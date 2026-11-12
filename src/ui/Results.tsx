@@ -1,9 +1,7 @@
 import type { PlanInputs, PlanResult } from '../planner.ts';
 import type { Ms } from '../domain/types.ts';
 import { ACTIVITIES } from '../catalog/catalog.ts';
-import { DataFreshness } from './DataFreshness.tsx';
 import { EventCard } from './EventCard.tsx';
-import { fmtDateTime, tzAbbrev } from './format.ts';
 
 interface Props {
   inputs: PlanInputs;
@@ -14,6 +12,9 @@ interface Props {
   statusProblem: string | null;
 }
 
+/** Days after which the downloaded data gets a visible warning (actionable; routine timestamps stay in the footer). */
+const STALE_DATA_NOTICE_DAYS = 3;
+
 export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem }: Props) {
   const { criteria, timeZone: tz } = inputs;
   const { windows, diagnosis, eligibility } = result;
@@ -21,8 +22,7 @@ export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem 
   const considered = result.consideredNoradIds.map(names);
   const excluded = eligibility.filter((e) => !e.eligible);
   const unselected = eligibility.filter((e) => e.eligible && !result.consideredNoradIds.includes(e.noradId));
-  const z = (ms: Ms) => `${fmtDateTime(ms, tz)} ${tzAbbrev(ms, tz)}`;
-  const checkedAt = result.meta.eligibilityCheckedAtMs ?? nowMs;
+  const staleDays = (nowMs - Date.parse(result.meta.elementsDownloadedAt)) / 86_400_000;
   const diagCount = excluded.length + result.skipped.length;
 
   return (
@@ -37,15 +37,17 @@ export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem 
         {' '}Satellites considered: <strong>{considered.length ? considered.join(', ') : 'none (no selected satellite currently qualifies)'}</strong>.
       </p>
 
-      <div className="card">
-        <DataFreshness meta={result.meta} tz={tz} nowMs={nowMs} />
-        {statusProblem && <p className="notice warn" role="note">{statusProblem}</p>}
-        {result.predictionErrors.length > 0 && (
-          <p className="notice warn" role="note">
-            Prediction failed for {result.predictionErrors.map((e) => names(e.noradId)).join(', ')}.
-          </p>
-        )}
-      </div>
+      {staleDays > STALE_DATA_NOTICE_DAYS && (
+        <p className="notice warn" role="note">
+          This copy of the data was downloaded {Math.round(staleDays)} days ago. Searching does not download newer data, and reports older than 72 hours cannot qualify a satellite.
+        </p>
+      )}
+      {statusProblem && <p className="notice warn" role="note">{statusProblem}</p>}
+      {result.predictionErrors.length > 0 && (
+        <p className="notice warn" role="note">
+          Prediction failed for {result.predictionErrors.map((e) => names(e.noradId)).join(', ')}.
+        </p>
+      )}
 
       {windows.length === 0 && diagnosis && (
         <div className="card no-results" role="region" aria-label="Why there are no results">
@@ -90,8 +92,7 @@ export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem 
       <details className="card diagnostics">
         <summary>Satellites not considered ({diagCount})</summary>
         <p className="hint small">
-          Eligibility was checked against the current time ({z(checkedAt)}) using the status reports already downloaded
-          {result.meta.statusDownloadedAt ? ` (${z(Date.parse(result.meta.statusDownloadedAt))})` : ' (none available)'}. Searching does not download new reports.
+          Eligibility is checked against the current time using the reports already downloaded; searching does not download new reports.
           A satellite is left out when this planner lacks the required evidence, a “heard” report for its FM repeater in the last 72 hours. That does not show it is inactive.
         </p>
         {excluded.length > 0 && (
