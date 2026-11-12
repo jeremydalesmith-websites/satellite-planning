@@ -131,3 +131,50 @@ describe('verdicts from status', () => {
     expect(assessed(base, st).verdict).toBe(verdict);
   });
 });
+
+describe('FM-mode matching: other modes and beacons can never establish FM availability', () => {
+  const fileWith = (satellites: StatusFile['satellites']): StatusFile => ({
+    schema: 1, source: { name: 't', url: 'u', license: 'x' }, downloadedAt: new Date(NOW).toISOString(), satellites,
+  });
+  const loud = Array.from({ length: 20 }, (_, i): [number, 'H', number] => [hoursAgo(1 + i), 'H', i]);
+
+  it('lots of "Heard" reports under OTHER modes of the same satellite are ignored (classifier reads only the FM key)', () => {
+    const f = fileWith({ 'ISS_[Crew]': { reports: loud }, 'ISS_[SSTV]': { reports: loud }, 'ISS_[VHF_Digi]': { reports: loud }, 'ISS_[FM]': { reports: [] } });
+    const s = classifyStatus({ amsatStatusKey: 'ISS_[FM]', scheduleDependent: true }, f, NOW);
+    expect(s.countsTowardMinimum).toBe(false);
+    expect(s.detail).toBe('no-recent-reports');
+  });
+  it('"Crew Active" inside the FM entry is ignored: it is not repeater evidence', () => {
+    const s = classifyStatus(iss, file('ISS_[FM]', [[hoursAgo(1), 'C', 0], [hoursAgo(2), 'C', 1]]), NOW);
+    expect(s.countsTowardMinimum).toBe(false);
+    expect(s.positives).toBe(0);
+  });
+  it('beacon-only ("Telemetry Only") reports are counted as NOT working and reported separately', () => {
+    const s = classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'T', 0], [hoursAgo(2), 'T', 1], [hoursAgo(3), 'N', 2]]), NOW);
+    expect(s.beaconOnly).toBe(2);
+    expect(s.notHeard).toBe(1);
+    expect(s.positives).toBe(0);
+    expect(s.countsTowardMinimum).toBe(false);
+  });
+});
+
+describe('three kinds of "no" are distinct in label, detail and wording', () => {
+  const notHeard = classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'N', 0]]), NOW);
+  const mixed = classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'N', 0], [hoursAgo(4), 'H', 1]]), NOW);
+  const confirmed = classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'N', 0], [hoursAgo(2), 'N', 1]]), NOW);
+  it('labels', () => {
+    expect(notHeard.label).toBe('Not heard (unconfirmed)');
+    expect(mixed.label).toBe('Mixed reports');
+    expect(confirmed.label).toBe('Confirmed unavailable');
+    expect(new Set([notHeard.label, mixed.label, confirmed.label]).size).toBe(3);
+  });
+  it('details and policy outcome', () => {
+    expect([notHeard.detail, mixed.detail, confirmed.detail]).toEqual(['not-heard', 'mixed', 'confirmed-unavailable']);
+    expect([notHeard.state, mixed.state, confirmed.state]).toEqual(['unknown-stale', 'unknown-stale', 'known-unavailable']);
+    // only "confirmed unavailable" is excluded; the others stay conditional. None counts.
+    expect([notHeard, mixed, confirmed].every((s) => !s.countsTowardMinimum)).toBe(true);
+  });
+  it('a schedule-dependent repeater with nothing recent keeps the schedule wording', () => {
+    expect(classifyStatus(iss, file('ISS_[FM]', []), NOW).label).toBe('Schedule-dependent (unconfirmed)');
+  });
+});

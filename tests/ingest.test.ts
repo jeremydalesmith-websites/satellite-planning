@@ -68,3 +68,30 @@ describe('status API ingestion', () => {
     expect(Object.keys(statusFixture.satellites)).toContain('SO-50_[FM]');
   });
 });
+
+describe('status ingestion: mode matching defence', () => {
+  const row = (name: string, report: string, norad: number | null = 27607, extra = {}) =>
+    ({ name, report, norad_cat_id: norad, observation_time: '2026-11-12T10:00:00Z', callsign: 'AA1AA', ...extra });
+  const expected = { name: 'SO-50_[FM]', noradId: 27607 };
+
+  it('keeps rows from the requested FM entry', () => {
+    const r = parseStatusReports({ data: [row('SO-50_[FM]', 'Heard')] }, expected);
+    expect(r.reports).toHaveLength(1);
+    expect(r.problems).toEqual([]);
+  });
+  it('rejects rows from another mode of the same satellite (even if the API returned them)', () => {
+    const r = parseStatusReports({ data: [row('SO-50_[SSTV]', 'Heard'), row('SO-50_[VHF_Digi]', 'Heard'), row('SO-50_[FM]', 'Not Heard')] }, expected);
+    expect(r.reports.map((x) => x[1])).toEqual(['N']);
+    expect(r.problems).toHaveLength(2);
+    expect(r.problems[0]).toMatch(/different entry/);
+  });
+  it('rejects a row whose NORAD ID contradicts the catalog, but accepts a null one (AMSAT lacks an ID for CAS-3H)', () => {
+    expect(parseStatusReports({ data: [row('SO-50_[FM]', 'Heard', 99999)] }, expected).reports).toEqual([]);
+    expect(parseStatusReports({ data: [row('SO-50_[FM]', 'Heard', null)] }, expected).reports).toHaveLength(1);
+  });
+  it('a whole response for the wrong entry yields no reports', () => {
+    const r = parseStatusReports({ data: Array.from({ length: 30 }, () => row('ISS_[Crew]', 'Heard', 25544)) }, expected);
+    expect(r.reports).toEqual([]);
+    expect(r.problems).toHaveLength(30);
+  });
+});

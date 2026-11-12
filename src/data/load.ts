@@ -9,8 +9,18 @@ export type LoadResult =
   | { ok: true; data: LoadedData; statusProblem: string | null }
   | { ok: false; message: string };
 
+/**
+ * Where the published data files live. With an absolute build base (e.g. /satellites/) the URL
+ * is anchored to that base, so it is correct even if the page itself is opened without a
+ * trailing slash. With the default relative base ('./') it resolves against the page's own URL,
+ * which is what lets one build work from any sub-directory.
+ */
+export function dataUrl(path: string, base: string = import.meta.env.BASE_URL, origin: string = window.location.origin, baseURI: string = document.baseURI): URL {
+  return base.startsWith('/') ? new URL(base + path, origin) : new URL(path, baseURI);
+}
+
 async function getJson(path: string): Promise<unknown> {
-  const res = await fetch(new URL(path, document.baseURI), { cache: 'no-cache' });
+  const res = await fetch(dataUrl(path), { cache: 'no-cache' });
   if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
   const type = res.headers.get('content-type') ?? '';
   const text = await res.text();

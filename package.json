@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "refresh-data": "node scripts/refresh-data.ts"
+    "refresh-data": "node scripts/refresh-data.ts",
+    "build:satellites": "tsc --noEmit && vite build --base=/satellites/"
   },
   "dependencies": {
     "astronomy-engine": "^2.1.19",

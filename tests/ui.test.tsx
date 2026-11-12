@@ -171,3 +171,16 @@ describe('data loading', () => {
     expect(r.ok && r.statusProblem).toMatch(/unconfirmed/);
   });
 });
+
+describe('data URL resolution (base path)', () => {
+  const o = 'https://example.org';
+  it('absolute base is anchored to the base, whatever the page URL is (e.g. visited without a trailing slash)', async () => {
+    const { dataUrl } = await import('../src/data/load.ts');
+    expect(dataUrl('data/elements.json', '/satellites/', o, o + '/satellites').href).toBe(o + '/satellites/data/elements.json');
+  });
+  it('relative base resolves against the page, so one build works from any sub-directory', async () => {
+    const { dataUrl } = await import('../src/data/load.ts');
+    expect(dataUrl('data/elements.json', './', o, o + '/a/b/').href).toBe(o + '/a/b/data/elements.json');
+    expect(dataUrl('data/elements.json', './', o, o + '/satellites/').href).toBe(o + '/satellites/data/elements.json');
+  });
+});

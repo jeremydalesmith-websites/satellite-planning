@@ -19,7 +19,8 @@ export const AO91 = 43017; // sunlight-dependent
 export function status(state: StatusState, scheduleDependent = false): OperationalStatus {
   return {
     state, label: STATUS_LABELS[state], explanation: 'test', scheduleDependent,
-    lastPositiveMs: null, lastNegativeMs: null, positives: 0, negatives: 0, windowHours: 72,
+    detail: state === 'recently-reported-active' ? 'active' : state === 'known-unavailable' ? 'confirmed-unavailable' : 'no-recent-reports',
+    lastPositiveMs: null, lastNegativeMs: null, positives: 0, negatives: 0, notHeard: 0, beaconOnly: 0, windowHours: 72,
     dataDownloadedAt: null, countsTowardMinimum: state === 'recently-reported-active',
   };
 }

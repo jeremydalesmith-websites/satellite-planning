@@ -18,24 +18,54 @@ station.
 ---
 
 ## Contents
-1. [Local development](#local-development)
-2. [Testing](#testing)
-3. [GitHub Pages deployment](#github-pages-deployment)
-4. [Public data sources and refresh](#public-data-sources-and-refresh)
-5. [How passes are counted](#how-passes-are-counted)
-6. [Policies (tunable assumptions)](#policies-tunable-assumptions)
-7. [Catalog maintenance](#catalog-maintenance)
-8. [Long-range prediction limitations](#long-range-prediction-limitations)
-9. [Privacy](#privacy)
-10. [Deferred features](#deferred-features)
-11. [Project layout](#project-layout)
+1. [Requirement checklist](#requirement-checklist)
+2. [Local development](#local-development)
+3. [Testing](#testing)
+4. [Deployment and base path](#deployment-and-base-path)
+5. [Public data sources and refresh](#public-data-sources-and-refresh)
+6. [How passes are counted](#how-passes-are-counted)
+7. [Policies (tunable assumptions)](#policies-tunable-assumptions)
+8. [Catalog maintenance](#catalog-maintenance)
+9. [Long-range prediction limitations](#long-range-prediction-limitations)
+10. [Privacy](#privacy)
+11. [Deferred features](#deferred-features)
+12. [Project layout](#project-layout)
+
+## Requirement checklist
+
+Status key: **Done** = implemented and exercised by automated tests; **Done\*** = implemented, with
+the stated limitation or only partial automated coverage; **Not yet** = deliberately not in this phase.
+"Tests" names the files under `tests/`; "browser check" means a manual Playwright run (not part of `npm test`).
+
+| # | Requirement | Status | Evidence | Limitations |
+|---|---|---|---|---|
+| 1 | Find clusters of usable FM passes inside my availability; search up to 42 days, marked provisional | Done | `cluster`, `availability`, `planner` | "Tentative/provisional" are wording tiers (>7 / >28 days past the elements epoch), not accuracy figures |
+| 2a | TypeScript, Vite, React, `satellite.js`, phone + desktop | Done | build, typecheck, browser check | Phone layout verified in a 390 px Chromium window only, not on real devices |
+| 2b | Static, GitHub Pages-compatible, configurable sub-directory | Done | `scripts/e2e-basepath.mjs`: 17/17 checks under `/satellites/` (relative and absolute base) and `/tools/sat/` | Not published; the mapping of `/satellites/` to this repository is a deployment-phase decision (see below) |
+| 2c | Local storage for preferences and saved events | Done | `ui` tests, browser reload check | Per-browser only; cleared if the user clears site data |
+| 2d | Scheduled GitHub Actions data refresh | **Not yet** | `scripts/refresh-data.ts` works by hand | No workflow in this phase (Phase 3, needs approval) |
+| 2e | No Firebase/DB/auth/paid API/LLM; no secrets in frontend | Done | code review | The refresh script sends a generic User-Agent |
+| 3 | FM repeaters only, 2 m/70 cm cross-band, V/U and U/V; extensible internal model | Done | `planner` (catalog) | `ActivityKind` has one value today; SSTV etc. deliberately not built |
+| 4 | Inputs: location (manual + optional button), timezone, date range, min elevation, duration, min opportunities, validation | Done* | `ui` (validation, defaults, geolocation never called unprompted), `availability` | Real browser geolocation not tested; minimum opportunities accepts 2 to 10 (not 1); elevation limited to 5 to 85 degrees |
+| 5 | Weekly Sun-Sat x Morning/Midday/Evening grid; editable boundaries; merge adjacent; whole event must fit; explicit selection; accessible | Done* | `availability`, `ui` | Periods cannot cross midnight; touch usability not tested on real phones |
+| 6 | Local SGP4 predictions with refined rise/peak/set/threshold/eclipse; three timestamps; Worker | Done | `predict` (vs 1 s brute force), `docs/VALIDATION.md` (vs Skyfield) | No confidence intervals (intended); observer height fixed at 0; no terrain mask |
+| 7a | Curated catalog in three separate layers with sources | Done* | `planner` (catalog) | Frequencies/restrictions are hand-copied from one AMSAT page dated 2026-10-31. "Status timestamp/explanation" is held per restriction (`asOf`, text) plus a catalog-wide review date, not as per-satellite fields |
+| 7b | AMSAT activity ingestion; FM-mode matching; four operating states; strict counting | Done | `ingest`, `eligibility` | Reports are volunteer observations; whether an operator filed under the right mode cannot be verified |
+| 8 | Sunlight at the satellite, partial eclipse, eligible-portion elevation, explained exclusions | Done* | `eligibility`, `planner` (ISS real-orbit tests), Skyfield comparison | Only AO-91 is flagged sunlight-dependent (only it has a cited source); any penumbra counts as not sunlit |
+| 9 | Cluster finder: non-overlapping count, fit-inside rule, consolidation, ranking, honest empty results | Done | `cluster`, `planner` (vs minute-by-minute reference) | Conservative single-station rule; touching passes count as sequential with no setup gap |
+| 10 | Event cards and pass cards with all required fields | Done* | browser check, screenshots | `EventCard`, `PassCard` and the timeline have no component tests; the timeline is decorative (`aria-hidden`) with the same information in text |
+| 11 | Saved events stay fixed; recomputed; changes and minimum warning | Done* | `saved` | Re-checked when the Saved tab is opened (not on app load); local to one browser |
+| 12 | Separate testable modules; required test list; independent validation | Done* | 146 tests; `docs/VALIDATION.md` | Skyfield validation needs Python and is not in `npm test`; it checks the implementation, not real-world accuracy |
+| 13 | README (dev, test, deploy, data, catalog, limits, deferred) | Done | this file | |
 
 ## Local development
 
 Requires Node 22.18 or newer (the refresh script uses Node's built-in TypeScript support).
+Use `npm ci` (not `npm install`) so you get exactly the locked dependency versions; use
+`npm install` only when you are deliberately changing dependencies.
 
 ```bash
-npm install
+npm ci                 # installs exactly the versions in package-lock.json
 npm start              # downloads fresh AMSAT data, then serves http://localhost:5173/
 ```
 
@@ -62,7 +92,7 @@ Other scripts: `npm run typecheck`, `npm run build`, `npm run preview`,
 npm test
 ```
 
-134 tests, no network needed. They use **clearly labelled fixtures**: real AMSAT
+146 tests, no network needed. They use **clearly labelled fixtures**: real AMSAT
 elements and status reports frozen on 2026-11-12 in `tests/fixtures/`, plus
 synthetic geometry in `tests/factory.ts` where an exact boundary is needed.
 They cover elevation-threshold boundaries; partial eclipse and local-night vs
@@ -76,29 +106,51 @@ Independent validation against Skyfield is documented in
 [`docs/VALIDATION.md`](docs/VALIDATION.md) (112–223 passes per case agree to
 ≤0.22 s and ≤0.007°; discrepancies explained there).
 
-`scripts/e2e-smoke.mjs` is a manual browser check, not part of `npm test`. It serves the build from a sub-directory and drives it in
-Chromium (needs Playwright): `npm run build && node scripts/serve-subdir.mjs /satellites/ 4173 &`
-then `node scripts/e2e-smoke.mjs http://localhost:4173/satellites/ ./shots`.
+Two manual browser checks (need Playwright; not part of `npm test`): `scripts/e2e-smoke.mjs` (form, search, save,
+phone layout, with screenshots) and `scripts/e2e-basepath.mjs` (sub-path behaviour; see Deployment).
 
-## GitHub Pages deployment
+## Deployment and base path
 
-> **Not included yet.** This repository currently has **no GitHub Actions
-> workflows**, nothing is published, Pages is not enabled, and no domain or DNS
-> is configured. A refresh-and-deploy workflow is planned as a later, separately
-> approved phase.
+> **Not published and not enabled.** This repository has **no GitHub Actions workflows**,
+> Pages is not enabled, and no domain or DNS is configured. A refresh-and-deploy workflow is a
+> later phase that needs your approval.
 
-What is already in place for deployment:
+**Intended public address:** `https://k1kfx.com/satellites/`. A separate fox-hunting app is
+planned at `/hunt`; nothing in this repository reads, writes or links to it.
 
-* The build is a static folder (`npm run build` → `dist/`).
-* The base path is **configurable**. By default the app uses relative URLs
-  (`base: './'`), so the same build works from any sub-directory without
-  touching other content on a domain. Set `VITE_BASE_PATH=/some/path/` when
-  building to use absolute paths instead.
-* `node scripts/serve-subdir.mjs /satellites/ 4173` serves `dist/` under a path
-  so you can verify sub-directory behaviour locally before publishing anything.
-* The data refresh (`npm run refresh-data`) needs no secrets or API keys.
+**Base path is configurable.** The source stays at the repository root; only the build's URL
+prefix changes:
 
-The final URL and sub-path are intentionally undecided.
+```bash
+npm run build:satellites          # absolute base /satellites/  (the intended public build)
+VITE_BASE_PATH=/other/ npm run build   # any other absolute base (macOS/Linux; on Windows use: npx vite build --base=/other/)
+npm run build                     # default: relative URLs, works from any sub-directory
+```
+
+**Verified** (`scripts/e2e-basepath.mjs`, Chromium; 17 checks each, all passing) for the relative
+build and the `/satellites/` build served under `/satellites/`, and the relative build under
+`/tools/sat/`: the page renders; all assets, the Web Worker and both data files load from under
+the prefix; a search runs and shows results; switching tabs works; reloading keeps working
+(preferences and saved events persist); `/satellites/index.html` works; `/satellites` without the
+slash redirects to `/satellites/` (the test server emulates the redirect GitHub Pages performs);
+**no request ever leaves the prefix** (nothing is read from `/` or `/hunt`); no HTTP, console or
+page errors; and a stand-in `/hunt/` page is still served by the "other app", unchanged. Reproduce:
+
+```bash
+npm run build:satellites
+node scripts/serve-subdir.mjs /satellites/ 4173 &
+node scripts/e2e-basepath.mjs http://localhost:4173 /satellites/    # needs Playwright
+```
+
+**Not verified (cannot be, until deployment):** how GitHub Pages will actually map
+`/satellites/` to this repository. A GitHub *project* Pages site is normally served at
+`/<repository-name>/` (here that would be `/satellite-planning/`) under the owner's custom
+domain, so reaching exactly `/satellites/` needs a deployment-phase choice, such as renaming the
+repository to `satellites` or publishing `dist/` into a `satellites/` folder of whichever
+repository serves `k1kfx.com`. That decision, and what it does to your existing site, is yours to
+approve in the deployment phase. The build above works for either.
+
+The data refresh (`npm run refresh-data`) needs no secrets or API keys.
 
 ## Public data sources and refresh
 
@@ -164,13 +216,56 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
   (15-minute-aligned) start; windows overlapping a better one by ≥50% are
   folded into it ("N nearly identical windows folded").
 * **Status gating.** Only repeaters *recently reported active* count toward
-  your minimum. Unknown, stale, mixed-report and unconfirmed schedule-dependent
-  repeaters appear separately as **conditional**; repeaters reported not
-  working are excluded and listed with the reason. A heard beacon
-  ("Telemetry Only") never counts as repeater activity.
+  your minimum. Everything else is either **conditional** (shown, not counted) or
+  **excluded**; see the vocabulary and matching rules below.
 * **No results?** The page explains why and suggests what could be relaxed
   (fewer opportunities, lower elevation, longer event, more availability,
   counting conditionals). Nothing is ever relaxed automatically.
+
+### How AMSAT reports are matched to the FM repeater
+
+AMSAT's status service lists every mode of a satellite as its **own entry**: `ISS_[FM]`,
+`ISS_[Crew]`, `ISS_[SSTV]`, `ISS_[VHF_Digi]`, `AO-123_[FM]`, `AO-123_[SSDV]`, and so on
+(`https://status.amsat.org/api/v1/catalog.php`). The catalog stores, for each repeater, the
+exact FM key (for example `SO-50_[FM]`), and:
+
+1. the refresh script requests **only that key** (`reports.php?name=SO-50_[FM]`), one request per
+   catalog repeater, so no other mode is ever downloaded;
+2. as a second line of defence, ingestion **rejects any returned row whose own `name` is not that
+   exact key** (or whose NORAD ID contradicts the catalog; AMSAT has no ID for CAS-3H, so a
+   missing ID is accepted) and records the rejection;
+3. the classifier reads only that key's reports, so reports filed under another mode of the same
+   satellite cannot influence it.
+
+Checked against the live API on 2026-11-12: all 13 FM entries that had reports returned rows named
+exactly their own key and matching NORAD IDs; `tests/ingest.test.ts` and `tests/eligibility.test.ts`
+prove that rows or whole responses from other modes (SSTV, digipeater, crew) are rejected or ignored.
+
+Within the FM entry, report values are interpreted like this:
+
+| AMSAT value | Meaning here | Can it make the repeater count? |
+|---|---|---|
+| Heard | Someone worked/heard the **FM repeater** | Yes, if recent and not contradicted by a newer negative |
+| Telemetry Only | Only the **beacon/telemetry** was heard, so the repeater is not shown to work | No (counted as a negative) |
+| Not Heard | Nothing received | No (counted as a negative) |
+| Crew Active | ISS crew voice (belongs to the `ISS_[Crew]` entry) | No: ignored |
+
+So a heard beacon, or activity in any other mode, **cannot** establish FM repeater availability.
+Limitation: these are volunteer reports, and the software cannot tell whether an operator filed a
+report under the correct mode.
+
+### What each result label means (status vocabulary)
+
+| Label shown | When | Counts toward your minimum? | Shown as |
+|---|---|---|---|
+| **Recently reported active** | at least one "Heard" in the last 72 h and no newer negative | **Yes** | counted pass |
+| **Mixed reports** | "Heard" reports **and** a newer negative (not heard / beacon only) | No | conditional |
+| **Not heard (unconfirmed)** | negative report(s) only, but fewer than 2 reports or fewer than 2 operators | No | conditional |
+| **Confirmed unavailable** | at least 2 negative reports from at least 2 operators, no "Heard", all in the last 72 h | No | excluded, with the reason |
+| **No recent reports** / **Schedule-dependent (unconfirmed)** | no reports in 72 h (the latter if AMSAT says the repeater runs on a schedule, crew or test basis) | No | conditional |
+| **Status data unavailable** | the status file could not be loaded | No | conditional |
+
+"Confirmed" here means *repeatedly reported by several operators*, not verified by AMSAT.
 
 ## Policies (tunable assumptions)
 
@@ -180,8 +275,8 @@ owners. All live in `src/domain/policy.ts`.
 | Policy | Value | Effect |
 |---|---|---|
 | Status freshness window | 72 h | Only reports within it can confirm activity |
-| "Reported not working" | ≥2 negative reports from ≥2 operators, no positive | Excluded (one negative = just unconfirmed) |
-| Mixed evidence | newest report negative after a positive | Not counted (conditional) |
+| "Confirmed unavailable" | ≥2 negative reports from ≥2 operators, no positive | Excluded (one negative = just "not heard (unconfirmed)") |
+| "Mixed reports" | newest report negative after a positive | Not counted (conditional) |
 | Orbital-elements age limit | 30 days | Older sets are skipped and named in the results |
 | Prediction labels | >7 d "tentative", >28 d "provisional" (days past elements epoch) | Wording only, not an accuracy figure |
 | Shadow rule | shadow fraction ≥ 0.01 = not sunlit | Conservative for eclipse-restricted repeaters |
@@ -269,6 +364,6 @@ src/
   ui/            React components and styles
 scripts/         refresh-data.ts · smoke.ts · serve-subdir.mjs · e2e-smoke.mjs
 validation/      independent Skyfield comparison
-tests/           134 tests + labelled fixtures
+tests/           146 tests + labelled fixtures
 CLAUDE.md          working agreements for contributors
 ```

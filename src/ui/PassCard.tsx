@@ -104,7 +104,7 @@ export function PassCard({ pass: p, role, tz, overlapNames, window, statusDownlo
       ) : null}
 
       <p className="status">
-        <span className={`dot ${st.state}`} aria-hidden="true" /> <strong>{st.label}.</strong> {st.explanation}
+        <span className={`pill ${st.detail}`}>{st.label}</span> {st.explanation}
         {st.lastPositiveMs ? <> Last “heard” report {fmtDateTime(st.lastPositiveMs, tz)} {tzAbbrev(st.lastPositiveMs, tz)}.</> : null}
         {statusDownloadedAt ? <> <span className="muted">Status data downloaded {fmtDateTime(Date.parse(statusDownloadedAt), tz)}.</span></> : <span className="muted"> No status data loaded.</span>}
       </p>

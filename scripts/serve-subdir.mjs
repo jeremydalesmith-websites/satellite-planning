@@ -1,5 +1,11 @@
-// Serve ./dist under an arbitrary sub-path, to prove the build works from a sub-directory.
-//   node scripts/serve-subdir.mjs /some/sub/dir/ 4173
+// Serve ./dist under an arbitrary sub-path, to prove a build works from a sub-directory
+// WITHOUT touching anything else on a domain. Emulates what a static host (GitHub Pages) does:
+//   - /satellites  -> 301 -> /satellites/            (trailing-slash redirect)
+//   - /satellites/ -> dist/index.html
+//   - every other path (e.g. /hunt/) is answered by a stand-in "other app" page so a test can
+//     prove this app never reads or overwrites it.
+//
+//   node scripts/serve-subdir.mjs /satellites/ 4173
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
@@ -12,8 +18,12 @@ const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 
 createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://x');
+  if (url.pathname === prefix.slice(0, -1)) {
+    res.writeHead(301, { location: prefix + url.search }).end();
+    return;
+  }
   if (!url.pathname.startsWith(prefix)) {
-    res.writeHead(404, { 'content-type': 'text/html' }).end('<h1>Other site content (not found here)</h1>');
+    res.writeHead(200, { 'content-type': 'text/html' }).end(`<!doctype html><title>OTHER APP</title><h1 id="other-app">Other site content at ${url.pathname}</h1>`);
     return;
   }
   let rel = normalize(decodeURIComponent(url.pathname.slice(prefix.length))).replace(/^(\.\.[/\\])+/, '');

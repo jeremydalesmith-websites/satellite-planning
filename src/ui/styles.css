@@ -161,3 +161,10 @@ footer ul { padding-left: 20px; }
 }
 .tick:first-child { transform: translateX(0); }
 .tick:last-child { transform: translateX(-100%); }
+
+/* status pills: colour is never the only cue; the label text says what kind of "no" this is */
+.pill { display: inline-block; font-size: .78rem; font-weight: 700; padding: 1px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); }
+.pill.active { color: var(--ok); border-color: var(--ok); }
+.pill.confirmed-unavailable { color: var(--bad); border-color: var(--bad); }
+.pill.mixed, .pill.not-heard { color: var(--warn); border-color: var(--warn); }
+.pill.no-recent-reports, .pill.no-data { color: var(--muted); }

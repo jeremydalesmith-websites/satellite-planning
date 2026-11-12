@@ -48,8 +48,11 @@ in frontend code. Use `satellite.js` for orbital mechanics; do not hand-roll it.
 npm ci               # install exactly from package-lock.json (Node >= 22.18)
 npm run typecheck    # tsc --noEmit
 npm test             # vitest; needs no network (uses frozen fixtures)
-npm run build        # typecheck + production build into dist/
+npm run build        # typecheck + production build into dist/ (relative base)
+npm run build:satellites   # same, with the intended public base /satellites/
 ```
+Base-path check (needs Playwright): build, `node scripts/serve-subdir.mjs /satellites/ 4173 &`, then
+`node scripts/e2e-basepath.mjs http://localhost:4173 /satellites/` (all 17 checks must pass).
 For a working preview with real data: `npm start` (downloads AMSAT data, then
 serves http://localhost:5173/). Behind a proxy prefix with `NODE_USE_ENV_PROXY=1`.
 Independent prediction validation: see `docs/VALIDATION.md` (needs Python).
@@ -65,7 +68,13 @@ Independent prediction validation: see `docs/VALIDATION.md` (needs Python).
 * Do not add GitHub Actions workflows unless the current phase's approval says so.
 * The owner's existing website and domain (`k1kfx.com`) are not part of this
   repository: do not modify them or assume the domain is dedicated to this app.
-  Keep the deployment base path configurable (`VITE_BASE_PATH`, default relative).
+  Intended public URL: `https://k1kfx.com/satellites/`; a separate fox-hunting app
+  lives at `/hunt` and must never be read, linked, or overwritten. Keep the base path
+  configurable (`VITE_BASE_PATH` / `--base`, default relative). How `/satellites/` maps
+  to this repository is undecided and needs the owner's approval in the deployment phase.
+* Install with `npm ci` (locked versions), not `npm install`, unless changing dependencies.
+* AMSAT status reports are matched to the exact `_[FM]` entry; other modes and beacon-only
+  reports must never establish repeater availability (see README).
 
 ## Privacy
 Treat the owner's identity and location as private. Do not put personal details

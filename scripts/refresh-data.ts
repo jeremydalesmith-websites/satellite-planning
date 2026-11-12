@@ -72,7 +72,7 @@ async function refreshStatus(): Promise<void> {
     const url = `${STATUS_BASE}/reports.php?name=${encodeURIComponent(a.amsatStatusKey)}&hours=${STATUS_HOURS}&limit=${STATUS_LIMIT}`;
     try {
       const body = JSON.parse(await fetchText(url));
-      const { reports, problems } = parseStatusReports(body);
+      const { reports, problems } = parseStatusReports(body, { name: a.amsatStatusKey, noradId: a.noradId });
       if (problems.length) console.warn(`status ${a.amsatStatusKey}: ${problems.length} problem(s), e.g. ${problems[0]}`);
       satellites[a.amsatStatusKey] = { reports };
       ok++;
