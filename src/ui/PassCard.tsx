@@ -1,15 +1,13 @@
 import { ACTIVITIES, compactBands, describeBands } from '../catalog/catalog.ts';
 import { duration } from '../domain/intervals.ts';
-import type { Ms } from '../domain/types.ts';
 import type { PassAssessment } from '../eligibility/assess.ts';
-import { compass, fmtDateTime, fmtDuration, fmtTime, fmtTimeSec, tzAbbrev } from './format.ts';
+import { compass, fmtDateTime, fmtDuration, fmtEndSec, fmtSpan, fmtStartSec, fmtTime, fmtTimeSec, tzAbbrev } from './format.ts';
 
-export type PassRole = 'counted' | 'alternative' | 'edge' | 'excluded';
+export type PassRole = 'counted' | 'alternative' | 'excluded';
 
 const ROLE_LABEL: Record<Exclude<PassRole, 'counted'>, string> = {
   alternative: 'Overlaps (not counted)',
-  edge: 'Runs past event edge (not counted)',
-  excluded: 'Not usable',
+  excluded: 'Not counted',
 };
 
 interface Props {
@@ -18,24 +16,21 @@ interface Props {
   tz: string;
   /** Names of counted passes this one overlaps, for the "alternative" role. */
   overlapNames?: string[];
-  window?: { start: Ms; end: Ms };
   statusDownloadedAt: string | null;
 }
 
-export function PassCard({ pass: p, role, tz, overlapNames, window, statusDownloadedAt }: Props) {
+export function PassCard({ pass: p, role, tz, overlapNames, statusDownloadedAt }: Props) {
   const act = ACTIVITIES.find((a) => a.activityId === p.activityId)!;
   const eligMax = p.eligibleMaxElevationDeg;
   const differs = eligMax !== null && Math.abs(eligMax - p.fullMaxElevationDeg) >= 0.5;
   const above = p.aboveThreshold;
   const st = p.status;
+  const fullMs = p.setMs - p.riseMs;
+  const showOperating = p.sunlightRestricted && p.verdict === 'eligible' && p.operatingMs < fullMs - 1000;
 
   let why: string | null = null;
   if (role === 'alternative') {
     why = `Overlaps ${overlapNames?.join(' and ') || 'another counted pass'}; one station works one satellite at a time.`;
-  } else if (role === 'edge') {
-    why = window && p.operating
-      ? `Usable part (${fmtTimeSec(p.operating.start, tz)}–${fmtTimeSec(p.operating.end, tz)}) does not fit inside the event.`
-      : 'Usable part does not fit inside the event.';
   } else if (role === 'excluded') {
     why = p.reasons[0] ?? null;
   }
@@ -60,19 +55,29 @@ export function PassCard({ pass: p, role, tz, overlapNames, window, statusDownlo
       {why && <p className="why">{why}</p>}
       <dl className="key">
         <div>
+          <dt>AOS–LOS</dt>
+          <dd>{fmtStartSec(p.riseMs, tz)} – {fmtEndSec(p.setMs, tz)}</dd>
+        </div>
+        <div>
           <dt>Peak</dt>
           <dd>{fmtTime(p.peakMs, tz)}</dd>
         </div>
         <div>
           <dt>Max elevation</dt>
           <dd>
-            {p.fullMaxElevationDeg.toFixed(0)}°{differs && p.sunlightRestricted ? <span className="muted"> (usable {eligMax!.toFixed(0)}°)</span> : null}
+            {p.fullMaxElevationDeg.toFixed(0)}°{differs && p.sunlightRestricted ? <span className="muted"> ({eligMax!.toFixed(0)}° while sunlit)</span> : null}
           </dd>
         </div>
         <div>
-          <dt>Time above {p.thresholdDeg}°</dt>
-          <dd>{above ? fmtDuration(duration(above)) : 'never'}</dd>
+          <dt>Full pass</dt>
+          <dd>{fmtSpan(p.riseMs, p.setMs)}</dd>
         </div>
+        {showOperating && (
+          <div>
+            <dt>Sunlit operating time</dt>
+            <dd>{fmtDuration(p.operatingMs)}</dd>
+          </div>
+        )}
       </dl>
 
       <details className="more">
@@ -80,21 +85,17 @@ export function PassCard({ pass: p, role, tz, overlapNames, window, statusDownlo
         <p className="bands">{describeBands(act)}{act.uplink.ctcssHz ? ` · send a ${act.uplink.ctcssHz} Hz tone` : ''}</p>
         <dl>
           <div>
-            <dt>Rises</dt>
-            <dd>{fmtTime(p.riseMs, tz)} in the {compass(p.riseAzDeg)}</dd>
+            <dt>Rises / sets</dt>
+            <dd>{compass(p.riseAzDeg)} → {compass(p.setAzDeg)}</dd>
           </div>
           <div>
-            <dt>Sets</dt>
-            <dd>{fmtTime(p.setMs, tz)} in the {compass(p.setAzDeg)}</dd>
+            <dt>Time above {p.thresholdDeg}°</dt>
+            <dd>{above ? `${fmtDuration(duration(above))} (${fmtTimeSec(above.start, tz)}–${fmtTimeSec(above.end, tz)})` : 'never'}</dd>
           </div>
-          <div>
-            <dt>Above {p.thresholdDeg}° from</dt>
-            <dd>{above ? `${fmtTimeSec(above.start, tz)}–${fmtTimeSec(above.end, tz)}` : 'never'}</dd>
-          </div>
-          {p.sunlightRestricted && p.operating && (
+          {p.sunlightRestricted && p.operatingIntervals.length > 0 && (
             <div>
-              <dt>Usable (sunlit) portion</dt>
-              <dd>{fmtDuration(duration(p.operating))} ({fmtTimeSec(p.operating.start, tz)}–{fmtTimeSec(p.operating.end, tz)})</dd>
+              <dt>Sunlit operating interval{p.operatingIntervals.length > 1 ? 's' : ''}</dt>
+              <dd>{p.operatingIntervals.map((o) => `${fmtStartSec(o.start, tz)}–${fmtEndSec(o.end, tz)}`).join(', ')} ({fmtDuration(p.operatingMs)} in total)</dd>
             </div>
           )}
         </dl>
@@ -102,7 +103,7 @@ export function PassCard({ pass: p, role, tz, overlapNames, window, statusDownlo
           <p className={`sun ${p.sunlight}`}>
             <strong>Sunlight at the satellite:</strong>{' '}
             {p.sunlight === 'illuminated' && 'illuminated for the whole pass.'}
-            {p.sunlight === 'partly-eclipsed' && `partly eclipsed (${fmtDuration(p.shadowMs)} in Earth’s shadow); only the sunlit part is used.`}
+            {p.sunlight === 'partly-eclipsed' && `partly eclipsed (${fmtDuration(p.shadowMs)} in Earth’s shadow, where operation is not permitted).`}
             {p.sunlight === 'eclipsed' && 'in Earth’s shadow for the whole pass, so this repeater should not be used.'}
           </p>
         )}

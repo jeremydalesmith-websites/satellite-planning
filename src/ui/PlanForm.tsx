@@ -186,7 +186,8 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
             <span className="field-err" id="opp-err">{err('minOpportunitiesText')?.message}</span>
           </label>
         </div>
-        <div className="seg" role="radiogroup" aria-label="Event duration">
+        <span className="seg-label" id="span-label">Maximum cluster span</span>
+        <div className="seg" role="radiogroup" aria-labelledby="span-label">
           {EVENT_DURATIONS_MIN.map((m) => (
             <label key={m} className={f.durationMin === m ? 'on' : ''}>
               <input type="radio" name="dur" checked={f.durationMin === m} onChange={() => set('durationMin', m)} />

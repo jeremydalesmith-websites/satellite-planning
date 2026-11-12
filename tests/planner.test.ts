@@ -56,7 +56,7 @@ describe('stale / unavailable data', () => {
     const range = { start: now, end: now + 7 * DAY };
     const run = predictAll(usable, TEST_OBSERVER, range.start, range.end, { thresholdsDeg: predictionThresholds(40) });
     const plan = computePlan(
-      { observer: TEST_OBSERVER, timeZone: 'UTC', criteria: { minElevationDeg: 40, durationMin: 150, minOpportunities: 2 }, availability: av, range },
+      { observer: TEST_OBSERVER, timeZone: 'UTC', criteria: { minElevationDeg: 40, maxSpanMin: 150, minOpportunities: 2 }, availability: av, range },
       { elements: elementsFixture, status: null }, run.passes, run.errors, skipped, now,
     );
     expect(plan.assessments.some((a) => a.verdict === 'eligible')).toBe(false);
@@ -67,37 +67,44 @@ describe('stale / unavailable data', () => {
     expect(plan.eligibility.filter((e) => !e.status.activationRequired).every((e) => /status data unavailable/.test(e.reason ?? ''))).toBe(true);
     expect(plan.meta.statusDownloadedAt).toBeNull();
   });
-  it('with the real status fixture the finder matches a brute-force minute-by-minute reference', () => {
+  it('with the real status fixture the finder matches an independent brute-force reference (full-pass clusters, max span)', () => {
     const now = FIXTURE_DOWNLOAD_MS;
     const av = emptyAvailability();
     for (const p of ['morning', 'midday', 'evening'] as const) av.selected[p].fill(true);
     av.periods = { morning: { startMin: 0, endMin: 480 }, midday: { startMin: 480, endMin: 960 }, evening: { startMin: 960, endMin: 1440 } };
     const { usable, skipped } = usableElements(elementsFixture, now);
     const range = { start: now, end: now + 14 * DAY };
-    const D = 180 * 60_000;
+    const SPAN = 180 * 60_000;
     const run = predictAll(usable, TEST_OBSERVER, range.start, range.end, { thresholdsDeg: predictionThresholds(30) });
     const mk = (minOpp: number) => computePlan(
-      { observer: TEST_OBSERVER, timeZone: 'UTC', criteria: { minElevationDeg: 30, durationMin: 180, minOpportunities: minOpp }, availability: av, range },
+      { observer: TEST_OBSERVER, timeZone: 'UTC', criteria: { minElevationDeg: 30, maxSpanMin: 180, minOpportunities: minOpp }, availability: av, range },
       { elements: elementsFixture, status: statusFixture }, run.passes, run.errors, skipped, now,
     );
     const plan2 = mk(2);
 
-    // Independent reference: slide a 3 h window in 1-minute steps; count a maximum set of non-overlapping
-    // operating intervals with a plain earliest-finish-first greedy (a different algorithm from the DP).
-    const ops = plan2.assessments.filter((a) => a.verdict === 'eligible' && a.operating).map((a) => a.operating!).sort((x, y) => x.end - y.end);
-    let best = 0;
-    for (let s = range.start; s + D <= range.end; s += 60_000) {
+    // Independent reference: slide a window of the maximum span in 1-minute steps (and from every pass's AOS);
+    // inside it count a maximum set of non-overlapping FULL passes with a plain earliest-LOS-first greedy
+    // (a different algorithm from the DP used by the finder).
+    const passes = plan2.assessments.filter((a) => a.verdict === 'eligible' && a.operatingIntervals.length > 0).sort((x, y) => x.setMs - y.setMs);
+    const greedy = (s: number) => {
       let last = -Infinity, n = 0;
-      for (const o of ops) if (o.start >= s && o.end <= s + D && o.start >= last) { n++; last = o.end; }
-      best = Math.max(best, n);
-    }
+      for (const p of passes) if (p.riseMs >= s && p.setMs <= s + SPAN && p.riseMs >= last) { n++; last = p.setMs; }
+      return n;
+    };
+    let best = 0;
+    for (let s = range.start; s + SPAN <= range.end; s += 60_000) best = Math.max(best, greedy(s));
+    for (const p of passes) best = Math.max(best, greedy(p.riseMs));
     expect(best).toBeGreaterThanOrEqual(2);
     expect(Math.max(...plan2.windows.map((w) => w.counted.length))).toBe(best);
-    // "no windows" at 3 is only reported if the reference agrees nothing has 3
+    // "no clusters" at 3 is only reported if the reference agrees nothing has 3
     expect(mk(3).windows.length > 0).toBe(best >= 3);
     for (const w of plan2.windows) {
       w.counted.forEach((c) => expect(c.status.state).toBe('recently-reported-active'));
-      for (let i = 1; i < w.counted.length; i++) expect(w.counted[i]!.operating!.start).toBeGreaterThanOrEqual(w.counted[i - 1]!.operating!.end);
+      // header bounds are exactly the earliest AOS and latest LOS, within the maximum span, passes mutually non-overlapping
+      expect(w.window.start).toBe(Math.min(...w.counted.map((c) => c.riseMs)));
+      expect(w.window.end).toBe(Math.max(...w.counted.map((c) => c.setMs)));
+      expect(w.window.end - w.window.start).toBeLessThanOrEqual(SPAN);
+      for (let i = 1; i < w.counted.length; i++) expect(w.counted[i]!.riseMs).toBeGreaterThanOrEqual(w.counted[i - 1]!.setMs);
     }
   });
 });

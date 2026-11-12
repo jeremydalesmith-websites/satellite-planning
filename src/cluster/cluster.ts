@@ -1,30 +1,29 @@
 /**
- * Cluster finder: fixed-length event windows inside availability that contain
- * enough qualifying pass opportunities.
+ * Cluster finder: groups of qualifying FM passes that fit within a maximum span, inside one availability block.
  *
- * THE OVERLAP RULE (conservative, one operating station):
- *   Each eligible pass contributes one *operating interval* (see eligibility/assess.ts).
- *   Within a window we count the LARGEST SET OF PAIRWISE NON-OVERLAPPING operating
- *   intervals (touching end-to-start is allowed; there is no setup gap). Among sets
- *   of equal size we prefer more total operating time, then higher summed
- *   maximum elevations. Overlapping passes are NOT dropped from the output: they
- *   are reported as "alternatives" so the user can see them.
+ * MODEL (see README "How passes are counted"):
+ *  - A pass is selected by its MAXIMUM elevation (during a sunlit portion for sunlight-dependent repeaters).
+ *  - Its envelope is the FULL pass, AOS to LOS above the 0° horizon. The envelope drives everything below.
+ *  - A cluster is a set of counted passes. Its bounds are the earliest AOS and the latest LOS among them, so its
+ *    duration is the elapsed time between those endpoints, gaps included. Nothing is padded or buffered.
+ *  - The cluster must satisfy BOTH: (span <= the user's maximum span) and (the whole envelope inside ONE
+ *    availability block). The selected hours are a limit, never a required or padded event duration.
  *
- * A pass counts in a window only if its WHOLE operating interval lies inside the
- * window, so a sliver at the edge of the event never inflates the count.
+ * ONE-STATION OVERLAP RULE (conservative): two passes conflict if their full AOS-to-LOS envelopes overlap
+ * (touching end-to-start is allowed; there is no setup gap). We count the LARGEST SET of pairwise
+ * non-overlapping passes. Among equal counts we prefer more total permitted operating time (eclipsed time is
+ * never part of it), then a higher sum of maximum elevations. Counted passes never overlap, so no time is
+ * double-counted. Overlapping qualifying passes inside the cluster are listed as alternatives, not hidden.
+ * This is conservative: two passes that overlap only at low elevation are not counted together.
  *
- * Ranking: (1) number of opportunities, (2) total operating time, (3) summed
- * eligible maximum elevations, (4) earlier start. No opaque score.
+ * Ranking of clusters: (1) number of passes, (2) total operating time, (3) sum of maximum elevations,
+ * (4) earlier start. Exact duplicates (same counted passes) are removed. A shorter cluster with fewer passes is a
+ * distinct set and is kept; the display limit applies.
  */
-import { WINDOW_SIMILARITY_OVERLAP, RESULT_LIMIT, START_ALIGNMENT_MIN } from '../domain/policy.ts';
-import { contains, overlapMs, overlaps, duration } from '../domain/intervals.ts';
-import type { Interval, Ms } from '../domain/types.ts';
+import { RESULT_LIMIT, SAVED_EDGE_TOLERANCE_SEC } from '../domain/policy.ts';
+import { contains } from '../domain/intervals.ts';
+import type { Interval } from '../domain/types.ts';
 import type { PassAssessment } from '../eligibility/assess.ts';
-
-interface Opp {
-  a: PassAssessment;
-  iv: Interval;
-}
 
 type Score = [count: number, timeMs: number, sumEl: number];
 
@@ -35,26 +34,29 @@ function better(x: Score, y: Score): boolean {
   return false;
 }
 
+/** True when two passes' full AOS-to-LOS envelopes overlap (touching is not an overlap). */
+export const envelopesOverlap = (a: Pick<PassAssessment, 'riseMs' | 'setMs'>, b: Pick<PassAssessment, 'riseMs' | 'setMs'>): boolean =>
+  a.riseMs < b.setMs && b.riseMs < a.setMs;
+
 /**
- * Optimal selection of pairwise non-overlapping operating intervals
- * (weighted interval scheduling, lexicographic objective).
+ * Optimal selection of pairwise non-overlapping FULL passes (weighted interval scheduling, lexicographic
+ * objective: count, then permitted operating time, then summed eligible maximum elevations).
  * Returns the chosen assessments in time order.
  */
 export function selectNonOverlapping(list: readonly PassAssessment[]): PassAssessment[] {
-  const opps: Opp[] = list
-    .filter((a): a is PassAssessment & { operating: Interval } => a.operating !== null)
-    .map((a) => ({ a, iv: a.operating! }))
-    .sort((p, q) => p.iv.end - q.iv.end || p.iv.start - q.iv.start);
+  const opps = list
+    .filter((a) => a.operatingIntervals.length > 0)
+    .sort((p, q) => p.setMs - q.setMs || p.riseMs - q.riseMs);
   const n = opps.length;
   if (n === 0) return [];
-  // pred[i] = last index j < i with end_j <= start_i (or -1)
+  // pred[i] = last index j < i with LOS_j <= AOS_i (or -1)
   const pred: number[] = opps.map((o, i) => {
     let lo = 0;
     let hi = i - 1;
     let ans = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (opps[mid]!.iv.end <= o.iv.start) {
+      if (opps[mid]!.setMs <= o.riseMs) {
         ans = mid;
         lo = mid + 1;
       } else hi = mid - 1;
@@ -66,11 +68,7 @@ export function selectNonOverlapping(list: readonly PassAssessment[]): PassAsses
   for (let i = 0; i < n; i++) {
     const o = opps[i]!;
     const prev = best[pred[i]! + 1]!;
-    const withIt: Score = [
-      prev[0] + 1,
-      prev[1] + duration(o.iv),
-      prev[2] + (o.a.eligibleMaxElevationDeg ?? 0),
-    ];
+    const withIt: Score = [prev[0] + 1, prev[1] + o.operatingMs, prev[2] + (o.eligibleMaxElevationDeg ?? 0)];
     const without = best[i]!;
     if (better(withIt, without)) {
       best.push(withIt);
@@ -83,7 +81,7 @@ export function selectNonOverlapping(list: readonly PassAssessment[]): PassAsses
   const chosen: PassAssessment[] = [];
   for (let i = n - 1; i >= 0; ) {
     if (take[i]) {
-      chosen.push(opps[i]!.a);
+      chosen.push(opps[i]!);
       i = pred[i]!;
     } else i--;
   }
@@ -91,25 +89,54 @@ export function selectNonOverlapping(list: readonly PassAssessment[]): PassAsses
 }
 
 export interface WindowEvaluation {
-  window: Interval;
-  /** The counted, mutually non-overlapping opportunities, in time order. */
-  counted: PassAssessment[];
-  /** Eligible passes inside the window that overlap a counted pass (not counted). */
-  alternatives: PassAssessment[];
-  /** Eligible passes whose operating interval crosses the window edge (not counted). */
-  edge: PassAssessment[];
   /**
-   * Passes of eligible satellites excluded for eclipse. Passes of satellites lacking a qualifying
-   * recent FM report (exclusion 'status') are dropped here and never appear in any list or count.
+   * The cluster interval: earliest full-pass AOS to latest full-pass LOS among the counted passes. For a fixed
+   * saved event it is the saved interval instead.
    */
+  window: Interval;
+  /** The counted, mutually non-overlapping passes, in time order. */
+  counted: PassAssessment[];
+  /** Qualifying passes fully inside the window that overlap a counted pass (one station: not counted). */
+  alternatives: PassAssessment[];
+  /**
+   * Qualifying passes that overlap the window without lying fully inside it. Only meaningful for a FIXED saved
+   * interval (drift / out-of-window warnings); always empty for search results, which have no fixed window.
+   */
+  edge: PassAssessment[];
+  /** Passes of eligible satellites excluded because the elevation is reached only in Earth's shadow. */
   excluded: PassAssessment[];
+  /** Sum of permitted operating time of the counted passes (never includes eclipsed time, never double-counted). */
   totalOperatingMs: number;
   distinctSatellites: number;
   sumEligibleMaxElevationDeg: number;
 }
 
-/** Evaluate one fixed window. Used both for searching and for re-checking saved events. */
-export function evaluateWindow(window: Interval, all: readonly PassAssessment[]): WindowEvaluation {
+function summarize(
+  window: Interval,
+  counted: PassAssessment[],
+  alternatives: PassAssessment[],
+  edge: PassAssessment[],
+  excluded: PassAssessment[],
+): WindowEvaluation {
+  const byRise = (x: PassAssessment, y: PassAssessment) => x.riseMs - y.riseMs;
+  return {
+    window,
+    counted,
+    alternatives: alternatives.sort(byRise),
+    edge: edge.sort(byRise),
+    excluded: excluded.sort(byRise),
+    totalOperatingMs: counted.reduce((s, c) => s + c.operatingMs, 0),
+    distinctSatellites: new Set(counted.map((c) => c.noradId)).size,
+    sumEligibleMaxElevationDeg: counted.reduce((s, c) => s + (c.eligibleMaxElevationDeg ?? 0), 0),
+  };
+}
+
+/**
+ * Evaluate a FIXED interval (a saved event). A pass counts only if its whole AOS-to-LOS envelope lies inside it.
+ * Qualifying passes that merely overlap it are reported as `edge` so drift can be warned about.
+ */
+export function evaluateFixedInterval(window: Interval, all: readonly PassAssessment[]): WindowEvaluation {
+  const slack = SAVED_EDGE_TOLERANCE_SEC * 1000;
   const inside: PassAssessment[] = [];
   const edge: PassAssessment[] = [];
   const excluded: PassAssessment[] = [];
@@ -119,35 +146,35 @@ export function evaluateWindow(window: Interval, all: readonly PassAssessment[])
       if (a.exclusion === 'eclipse') excluded.push(a); // 'status' and 'below-threshold' are never shown
       continue;
     }
-    if (!a.operating) continue;
-    if (contains(window, a.operating)) {
-      inside.push(a);
-    } else if (overlaps(window, a.operating)) {
-      edge.push(a);
-    }
+    if (a.operatingIntervals.length === 0) continue;
+    // Whole pass inside the saved interval, allowing for sub-second recomputation jitter at its edges.
+    if (a.riseMs >= window.start - slack && a.setMs <= window.end + slack) inside.push(a);
+    else edge.push(a);
   }
   const counted = selectNonOverlapping(inside);
   const countedIds = new Set(counted.map((c) => c.passId));
-  const alternatives = inside.filter((a) => !countedIds.has(a.passId));
-  const byStart = (x: PassAssessment, y: PassAssessment) => x.operating!.start - y.operating!.start;
-  return {
-    window,
-    counted,
-    alternatives: alternatives.sort(byStart),
-    edge: edge.sort((x, y) => x.riseMs - y.riseMs),
-    excluded: excluded.sort((x, y) => x.riseMs - y.riseMs),
-    totalOperatingMs: counted.reduce((s, c) => s + duration(c.operating!), 0),
-    distinctSatellites: new Set(counted.map((c) => c.noradId)).size,
-    sumEligibleMaxElevationDeg: counted.reduce((s, c) => s + (c.eligibleMaxElevationDeg ?? 0), 0),
-  };
+  return summarize(window, counted, inside.filter((a) => !countedIds.has(a.passId)), edge, excluded);
 }
 
-export interface EventWindow extends WindowEvaluation {
-  /** How many other, substantially overlapping windows were folded into this one. */
-  similarWindows: number;
+/** Build the display detail of a search cluster from its counted set. The window is the actual cluster. */
+function clusterDetail(counted: PassAssessment[], all: readonly PassAssessment[]): WindowEvaluation {
+  const window: Interval = { start: Math.min(...counted.map((c) => c.riseMs)), end: Math.max(...counted.map((c) => c.setMs)) };
+  const countedIds = new Set(counted.map((c) => c.passId));
+  const alternatives: PassAssessment[] = [];
+  const excluded: PassAssessment[] = [];
+  for (const a of all) {
+    if (countedIds.has(a.passId) || !contains(window, a.envelope)) continue;
+    if (a.verdict === 'excluded') {
+      if (a.exclusion === 'eclipse') excluded.push(a);
+    } else if (a.operatingIntervals.length > 0) alternatives.push(a);
+  }
+  return summarize(window, counted, alternatives, [], excluded);
 }
 
-function compareWindows(a: WindowEvaluation, b: WindowEvaluation): number {
+/** A search result: one cluster. */
+export type EventWindow = WindowEvaluation;
+
+function compareClusters(a: WindowEvaluation, b: WindowEvaluation): number {
   return (
     b.counted.length - a.counted.length ||
     b.totalOperatingMs - a.totalOperatingMs ||
@@ -156,78 +183,45 @@ function compareWindows(a: WindowEvaluation, b: WindowEvaluation): number {
   );
 }
 
-/** Pick a tidy start time within [lo, hi]: nearest alignment boundary to the centre, else the centre. */
-export function tidyStart(lo: Ms, hi: Ms, alignMin = START_ALIGNMENT_MIN): Ms {
-  const step = alignMin * 60_000;
-  const centre = (lo + hi) / 2;
-  const g = Math.round(centre / step) * step;
-  const candidates = [g, g - step, g + step].filter((c) => c >= lo && c <= hi);
-  if (candidates.length) return candidates.reduce((x, y) => (Math.abs(x - centre) <= Math.abs(y - centre) ? x : y));
-  // No aligned time fits: use the centre, rounded to a second but never outside [lo, hi].
-  return Math.min(hi, Math.max(lo, Math.round(centre / 1000) * 1000));
-}
-
 export interface FindOptions {
-  durationMin: number;
+  /** Maximum cluster span in minutes (earliest AOS to latest LOS). */
+  maxSpanMin: number;
   minOpportunities: number;
   limit?: number;
 }
 
 /**
- * Find ranked, consolidated event windows.
- * @param availability normalized absolute intervals (the ONLY availability input)
+ * Find ranked clusters.
+ * @param availability normalized absolute intervals (the ONLY availability input). Each cluster's full
+ *   AOS-to-LOS envelope must lie inside ONE of them.
  */
 export function findEventWindows(
   all: readonly PassAssessment[],
   availability: readonly Interval[],
   opts: FindOptions,
 ): EventWindow[] {
-  const D = opts.durationMin * 60_000;
-  const eligible = all.filter((a) => a.verdict === 'eligible' && a.operating);
+  const span = opts.maxSpanMin * 60_000;
+  const eligible = all.filter((a) => a.verdict === 'eligible' && a.operatingIntervals.length > 0);
 
-  // Group candidate windows by (availability block, set of counted passes).
-  const groups = new Map<string, { block: Interval; ev: WindowEvaluation }>();
-  availability.forEach((block, bi) => {
-    if (block.end - block.start < D) return;
-    const lo = block.start;
-    const hi = block.end - D;
-    const starts = new Set<Ms>([lo, hi]);
-    for (const a of eligible) {
-      const o = a.operating!;
-      if (o.end <= block.start || o.start >= block.end) continue;
-      starts.add(Math.min(hi, Math.max(lo, o.start)));
-      starts.add(Math.min(hi, Math.max(lo, o.end - D)));
+  // Distinct counted sets. For every anchor (a pass's AOS) and every possible end (a pass's LOS) within the
+  // span, take the best set that fits; this also yields shorter clusters with fewer passes.
+  const sets = new Map<string, PassAssessment[]>();
+  for (const block of availability) {
+    const inBlock = eligible.filter((a) => a.riseMs >= block.start && a.setMs <= block.end).sort((x, y) => x.riseMs - y.riseMs);
+    for (const anchor of inBlock) {
+      const ends = [...new Set(inBlock.filter((p) => p.riseMs >= anchor.riseMs && p.setMs - anchor.riseMs <= span).map((p) => p.setMs))].sort((x, y) => x - y);
+      for (const end of ends) {
+        const candidates = inBlock.filter((p) => p.riseMs >= anchor.riseMs && p.setMs <= end);
+        const counted = selectNonOverlapping(candidates);
+        if (counted.length < opts.minOpportunities) continue;
+        const key = counted.map((c) => c.passId).join(',');
+        if (!sets.has(key)) sets.set(key, counted);
+      }
     }
-    for (const s of starts) {
-      const ev = evaluateWindow({ start: s, end: s + D }, all);
-      if (ev.counted.length < opts.minOpportunities) continue;
-      const key = bi + '|' + ev.counted.map((c) => c.passId).join(',');
-      if (!groups.has(key)) groups.set(key, { block, ev });
-    }
-  });
-
-  // Canonicalise each group: one tidy window that still contains the whole set.
-  const canon: WindowEvaluation[] = [];
-  for (const { block, ev } of groups.values()) {
-    const minStart = Math.min(...ev.counted.map((c) => c.operating!.start));
-    const maxEnd = Math.max(...ev.counted.map((c) => c.operating!.end));
-    const lo = Math.max(block.start, maxEnd - D);
-    const hi = Math.min(block.end - D, minStart);
-    const s = lo <= hi ? tidyStart(lo, hi) : ev.window.start;
-    const re = evaluateWindow({ start: s, end: s + D }, all);
-    // Keep the tidy window only if it is still entirely inside the availability block and
-    // still counts at least as many passes; otherwise keep the (valid) searched window.
-    const inBlock = re.window.start >= block.start && re.window.end <= block.end;
-    canon.push(inBlock && re.counted.length >= ev.counted.length ? re : ev);
   }
 
-  // Rank, then fold windows that substantially overlap a better one into it.
-  canon.sort(compareWindows);
-  const kept: EventWindow[] = [];
-  for (const w of canon) {
-    const host = kept.find((k) => overlapMs(k.window, w.window) >= WINDOW_SIMILARITY_OVERLAP * D);
-    if (host) host.similarWindows++;
-    else kept.push({ ...w, similarWindows: 0 });
-  }
-  return kept.slice(0, opts.limit ?? RESULT_LIMIT);
+  const clusters = [...sets.values()].map((counted) => clusterDetail(counted, all));
+  clusters.sort(compareClusters);
+  return clusters.slice(0, opts.limit ?? RESULT_LIMIT);
 }
+

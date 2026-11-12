@@ -8,7 +8,7 @@ import { computePlan, predictionThresholds, usableElements } from '../planner.ts
 import type { PlanInputs, PlanResult } from '../planner.ts';
 import { snapshotEvent } from '../saved/saved.ts';
 import type { SavedEvent } from '../saved/saved.ts';
-import { loadEvents, saveEvents } from '../storage.ts';
+import { clearLegacyEvents, countLegacyEvents, loadEvents, saveEvents } from '../storage.ts';
 import { PlanForm } from './PlanForm.tsx';
 import { Results } from './Results.tsx';
 import { SavedEvents } from './SavedEvents.tsx';
@@ -28,6 +28,8 @@ export function App() {
   const [load, setLoad] = useState<LoadResult | null>(null);
   const [search, setSearch] = useState<Search>({ state: 'idle' });
   const [events, setEvents] = useState<SavedEvent[]>(() => loadEvents());
+  // Entries from the earlier fixed-window model: left untouched in storage; removed only if the user asks.
+  const [legacyCount, setLegacyCount] = useState(() => countLegacyEvents());
   const [storageWarn, setStorageWarn] = useState(false);
   const handle = useRef<PredictHandle | null>(null);
   // Current-time snapshot for the picker and the Saved tab. Taken again every time a tab is opened,
@@ -165,7 +167,14 @@ export function App() {
           </>
         )}
         {tab === 'saved' && (
-          <SavedEvents events={events} data={data} nowMs={nowMs} onDelete={(id) => persist(events.filter((e) => e.id !== id))} />
+          <SavedEvents
+            events={events}
+            data={data}
+            nowMs={nowMs}
+            onDelete={(id) => persist(events.filter((e) => e.id !== id))}
+            legacyCount={legacyCount}
+            onClearLegacy={() => { if (clearLegacyEvents()) setLegacyCount(0); }}
+          />
         )}
       </main>
 

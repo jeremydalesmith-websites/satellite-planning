@@ -134,14 +134,12 @@ summary { cursor: pointer; padding: 8px 0; min-height: 44px; font-weight: 600; }
 .tick { position: absolute; transform: translateX(-50%); font-size: .7rem; color: var(--muted); white-space: nowrap; }
 .tick i { display: block; width: 1px; height: 5px; background: var(--border); margin: 0 auto 1px; }
 .tl-lane { position: relative; height: 22px; border-bottom: 1px dotted var(--border); }
-.tl-pass { position: absolute; top: 10px; height: 2px; background: var(--border); }
 .tl-op { position: absolute; top: 4px; height: 14px; border-radius: 3px; background: var(--counted); }
 .tl-op.alternative { background: repeating-linear-gradient(45deg, var(--alt), var(--alt) 3px, transparent 3px, transparent 6px); }
 .tl-label { position: absolute; top: 2px; font-size: .72rem; white-space: nowrap; line-height: 18px; }
 .tl-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: .75rem; color: var(--muted); margin-top: 6px; }
 .sw { display: inline-block; width: 14px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 .sw.counted { background: var(--counted); } .sw.alternative { background: var(--alt); }
-.sw.line { height: 2px; background: var(--border); }
 
 .changes ul { padding-left: 20px; margin: 4px 0; }
 .changes .lost { color: var(--bad); } .changes .added { color: var(--ok); }
@@ -195,3 +193,10 @@ button.link { background: none; border: 0; padding: 0; font: inherit; color: inh
   .date-range input { padding-inline: 8px; font-size: .95rem; }
 }
 footer .fresh { margin-top: 6px; }
+
+/* Full-pass timeline: solid where operation is permitted, hatched where it is prohibited */
+.tl-full { position: absolute; top: 4px; height: 14px; border-radius: 3px; }
+.tl-full.open { background: var(--counted); }
+.tl-full.restricted { background: repeating-linear-gradient(135deg, var(--alt) 0, var(--alt) 3px, transparent 3px, transparent 6px); border: 1px solid var(--alt); }
+.sw.shadow { background: repeating-linear-gradient(135deg, var(--alt) 0, var(--alt) 3px, transparent 3px, transparent 6px); border: 1px solid var(--alt); height: 8px; }
+.seg-label { display: block; font-weight: 600; margin-top: 12px; }

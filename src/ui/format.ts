@@ -36,3 +36,20 @@ export function ago(ms: Ms, nowMs: Ms): string {
   if (h < 48) return `${Math.round(h)} h ago`;
   return `${Math.round(h / 24)} days ago`;
 }
+
+/**
+ * Displayed bounds are rounded OUTWARD to whole seconds (start down, end up) so a header or card can never appear to
+ * exclude part of a pass. Durations shown next to them are computed from these same displayed bounds.
+ */
+export const floorSec = (ms: Ms): Ms => Math.floor(ms / 1000) * 1000;
+export const ceilSec = (ms: Ms): Ms => Math.ceil(ms / 1000) * 1000;
+export const fmtStartSec = (ms: Ms, tz: string) => fmtTimeSec(floorSec(ms), tz);
+export const fmtEndSec = (ms: Ms, tz: string) => fmtTimeSec(ceilSec(ms), tz);
+/** Elapsed time between two instants, as displayed (outward-rounded), e.g. "1 h 30 min 27 s", "10 min 49 s", "45 s". */
+export function fmtSpan(startMs: Ms, endMs: Ms): string {
+  const total = Math.round((ceilSec(endMs) - floorSec(startMs)) / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return [h ? `${h} h` : '', h || m ? `${m} min` : '', `${h || m ? String(s).padStart(2, '0') : s} s`].filter(Boolean).join(' ');
+}

@@ -33,7 +33,7 @@ export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem 
           : 'No qualifying event windows'}
       </h2>
       <p className="hint">
-        {criteria.durationMin / 60}-hour events with at least {criteria.minOpportunities} separate passes reaching {criteria.minElevationDeg}° or higher, inside your available times.
+        Clusters of at least {criteria.minOpportunities} separate passes, each reaching a peak of {criteria.minElevationDeg}° or higher, with every full pass (rise to set) inside your availability and within a maximum span of {criteria.maxSpanMin / 60} hours.
         {' '}Satellites considered: <strong>{considered.length ? considered.join(', ') : 'none (no selected satellite currently qualifies)'}</strong>.
       </p>
 
@@ -55,13 +55,13 @@ export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem 
           <ul>
             {considered.length === 0 && <li>No selected satellite has a qualifying FM report right now, so there is nothing to plan with. See “Satellites not considered” below.</li>}
             {diagnosis.availabilityBlocks === 0 && <li>Your selected days and times leave no available time inside the search dates.</li>}
-            {diagnosis.availabilityBlocks > 0 && diagnosis.blocksLongEnough === 0 && (
-              <li>None of your available blocks is long enough for a {criteria.durationMin / 60}-hour event. Tick adjacent periods (for example Midday and Evening) so they merge into longer blocks.</li>
+            {diagnosis.availabilityBlocks > 0 && diagnosis.eligiblePasses > 0 && diagnosis.blocksHoldingAPass === 0 && (
+              <li>None of your available time blocks can hold a whole qualifying pass from rising to setting (about 10 to 15 minutes). Tick longer or adjacent periods so they merge into longer blocks.</li>
             )}
             {considered.length > 0 && (
               <li>
-                {diagnosis.eligiblePasses} qualifying pass{diagnosis.eligiblePasses === 1 ? '' : 'es'} reach {criteria.minElevationDeg}° in your search.
-                No {criteria.durationMin / 60}-hour window inside your availability holds {criteria.minOpportunities} separate, non-overlapping ones.
+                {diagnosis.eligiblePasses} qualifying pass{diagnosis.eligiblePasses === 1 ? '' : 'es'} reach a peak of {criteria.minElevationDeg}° in your search.
+                No cluster within a {criteria.maxSpanMin / 60}-hour maximum span, entirely inside your availability, holds {criteria.minOpportunities} separate, non-overlapping ones.
               </li>
             )}
           </ul>

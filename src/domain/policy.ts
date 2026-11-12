@@ -10,12 +10,12 @@
 export const DEFAULT_SEARCH_DAYS = 28;
 export const MAX_SEARCH_DAYS = 42;
 
-/** Elevation input bounds. Below ~5° a pass is rarely usable in practice. */
+/** Elevation input bounds. Below ~5° a pass is rarely workable in practice. */
 export const MIN_ELEVATION_INPUT_DEG = 5;
 export const MAX_ELEVATION_INPUT_DEG = 85;
 export const DEFAULT_MIN_ELEVATION_DEG = 40;
 
-/** Event durations offered (minutes). */
+/** Maximum cluster spans offered (minutes). */
 export const EVENT_DURATIONS_MIN = [120, 150, 180] as const;
 export const DEFAULT_MIN_OPPORTUNITIES = 3;
 
@@ -54,12 +54,15 @@ export const PROVISIONAL_AFTER_DAYS = 28;
  */
 export const SUNLIT_SHADOW_FRACTION_BELOW = 0.01;
 
-/** Window consolidation: windows overlapping a better one by this fraction are merged into it. */
-export const WINDOW_SIMILARITY_OVERLAP = 0.5;
+/** Maximum number of clusters shown. */
 export const RESULT_LIMIT = 25;
 
-/** Preferred event start alignment (minutes) when there is slack. */
-export const START_ALIGNMENT_MIN = 15;
+/**
+ * A saved cluster interval is anchored exactly on a pass's AOS and LOS. Recomputing the same pass moves those instants
+ * by tens of milliseconds (the predictor refines crossings to a bisection tolerance), so a pass counts as inside the
+ * saved interval if it is within this many seconds of it. Far below the 60 s shifts reported as real changes.
+ */
+export const SAVED_EDGE_TOLERANCE_SEC = 2;
 
 /** Changes smaller than these are not reported as "meaningful" for saved events. */
 export const SAVED_SHIFT_REPORT_SEC = 60;

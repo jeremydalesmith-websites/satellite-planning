@@ -21,7 +21,7 @@ for (const p of ['midday', 'evening'] as const) { av.selected[p][0] = true; av.s
 av.selected.evening[2] = true; av.selected.evening[4] = true;                                          // Tue, Thu
 const s = localDate(now, tz);
 const { range } = rangeFromDates(s, addDays(s, 27, tz), tz, now);
-const base = { minElevationDeg: 40, durationMin: 150 };
+const base = { minElevationDeg: 40, maxSpanMin: 150 };
 const f = (ms: number) => DateTime.fromMillis(ms, { zone: tz }).toFormat('ccc LLL d HH:mm');
 const f2 = (ms: number) => DateTime.fromMillis(ms, { zone: tz }).toFormat('ccc LLL d HH:mm:ss');
 
@@ -30,7 +30,7 @@ console.log(`run at (UTC)        : ${new Date(now).toISOString()}`);
 console.log(`location            : ${observer.latDeg}, ${observer.lonDeg} (height 0 m)`);
 console.log(`timezone            : ${tz}`);
 console.log(`date range (local)  : ${f(range!.start)} -> ${f(range!.end)}  (28 days)`);
-console.log(`min peak elevation  : ${base.minElevationDeg} deg   event duration: ${base.durationMin / 60} h`);
+console.log(`min peak elevation  : ${base.minElevationDeg} deg   event duration: ${base.maxSpanMin / 60} h`);
 console.log('availability (merged local ranges):');
 WEEKDAY_LABELS.forEach((d, i) => { const r = mergedDayRanges(av, i); if (r.length) console.log(`   ${d.padEnd(9)} ${r.map(([a, b]) => `${formatMinutes(a)}-${formatMinutes(b)}`).join(', ')}`); });
 const { usable, skipped } = usableElements(elements, now);
@@ -66,9 +66,9 @@ console.table(by);
 
 for (const n of [3, 2]) {
   const plan = n === 3 ? plan3 : mk(2);
-  console.log(`\n=== RESULT with ${n} opportunities required: ${plan.windows.length} windows ===`);
+  console.log(`\n=== RESULT with ${n} opportunities required: ${plan.windows.length} clusters ===`);
   for (const w of plan.windows) {
-    console.log(`${f(w.window.start)} -> ${DateTime.fromMillis(w.window.end, { zone: tz }).toFormat('HH:mm')}  count=${w.counted.length} satellites=${w.distinctSatellites} similarFolded=${w.similarWindows}`);
-    for (const c of w.counted) console.log(`     counted  ${c.name.padEnd(8)} ${f2(c.operating!.start)}  peak ${c.fullMaxElevationDeg.toFixed(0)} deg`);
+    console.log(`${f(w.window.start)} -> ${DateTime.fromMillis(w.window.end, { zone: tz }).toFormat('HH:mm')}  count=${w.counted.length} satellites=${w.distinctSatellites} cluster ${((w.window.end - w.window.start) / 60000).toFixed(1)} min`);
+    for (const c of w.counted) console.log(`     counted  ${c.name.padEnd(8)} ${f2(c.riseMs)}-${f2(c.setMs)}  peak ${c.fullMaxElevationDeg.toFixed(0)} deg`);
   }
 }

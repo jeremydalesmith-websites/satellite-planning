@@ -72,7 +72,7 @@ export function validateForm(f: FormFields, nowMs: Ms): { inputs: PlanInputs | n
     inputs: {
       observer: { latDeg: lat, lonDeg: lon, heightKm: 0 },
       timeZone: f.timeZone,
-      criteria: { minElevationDeg: minEl, durationMin: f.durationMin, minOpportunities: minOpp },
+      criteria: { minElevationDeg: minEl, maxSpanMin: f.durationMin, minOpportunities: minOpp },
       availability: f.availability,
       range,
     },

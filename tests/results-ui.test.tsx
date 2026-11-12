@@ -22,7 +22,7 @@ for (const p of ['morning', 'midday', 'evening'] as const) av.selected[p].fill(t
 av.periods = { morning: { startMin: 0, endMin: 480 }, midday: { startMin: 480, endMin: 960 }, evening: { startMin: 960, endMin: 1440 } };
 const inputs = {
   observer: { latDeg: 0, lonDeg: 0, heightKm: 0 }, timeZone: 'UTC',
-  criteria: { minElevationDeg: 40, durationMin: 150, minOpportunities: 1 },
+  criteria: { minElevationDeg: 40, maxSpanMin: 150, minOpportunities: 1 },
   availability: av, range: { start: at(-120), end: at(400) }, selectedNoradIds: [27607],
 };
 const result = computePlan(inputs, { elements: { ...elementsFixture, downloadedAt: new Date(T0).toISOString() }, status }, [geom({ norad: 27607, rise: 56, set: 68, maxEl: 70, above: [60, 64] })], [], [], T0);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { classifyStatus } from '../src/eligibility/status.ts';
 import type { StatusFile } from '../src/data/ingest.ts';
-import { AO91, SO50, activity, assessed, at, iv } from './factory.ts';
+import { AO91, MIN, SO50, activity, assessed, at, iv } from './factory.ts';
 
 const NOW = Date.UTC(2027, 0, 9, 12, 0, 0);
 const hoursAgo = (h: number) => Math.floor((NOW - h * 3_600_000) / 1000);
@@ -67,16 +67,25 @@ describe('operating status policy', () => {
 });
 
 describe('elevation threshold boundary', () => {
-  it('a pass whose peak is below the threshold has no operating interval', () => {
+  it('a pass whose peak is below the threshold is not selected and has no permitted operating time', () => {
     const a = assessed({ rise: 0, set: 10, maxEl: 39.99, above: null });
-    expect(a.operating).toBeNull();
+    expect(a.operatingIntervals).toEqual([]);
+    expect(a.operatingMs).toBe(0);
     expect(a.verdict).toBe('excluded');
     expect(a.exclusion).toBe('below-threshold');
   });
-  it('a pass reaching exactly the threshold with a (tiny) interval qualifies', () => {
+  it('a pass whose MAXIMUM elevation exactly reaches the threshold is selected, and its whole AOS-to-LOS pass is the envelope', () => {
     const a = assessed({ rise: 0, set: 10, maxEl: 40, above: [4.999, 5.001] });
     expect(a.verdict).toBe('eligible');
-    expect(a.operating).not.toBeNull();
+    expect(a.envelope).toEqual(iv(0, 10));
+    expect(a.operatingIntervals).toEqual([iv(0, 10)]); // unrestricted: the full pass is permitted operating time
+    expect(a.operatingMs).toBe(10 * MIN);
+  });
+  it('selection is by peak elevation: a pass with only seconds above the threshold still qualifies, and its duration is the full pass', () => {
+    const a = assessed({ rise: 0, set: 12, maxEl: 40.2, above: [5.99, 6.01] });
+    expect(a.verdict).toBe('eligible');
+    expect(a.operatingMs).toBe(12 * MIN); // not the ~1 s above 40°
+    expect(a.aboveThreshold).toEqual(iv(5.99, 6.01)); // kept only as information (Details)
   });
 });
 
@@ -96,25 +105,35 @@ describe('sunlight (sunlight-dependent repeater: AO-91)', () => {
     expect(a.exclusion).toBe('eclipse');
     expect(a.reasons[0]).toMatch(/shadow/);
   });
-  it('partial eclipse: eligible portion keeps only the sunlit part, and max elevations differ', () => {
-    // Pass peaks at minute 6 (70°). Shadow from minute 5 to 12 removes the peak.
+  it('partial eclipse: the elevation is reached while sunlit, so the pass qualifies; permitted operating time is only the sunlit part', () => {
+    // Pass peaks at minute 6 (70°) in shadow, but the sunlit part (0-5 min) reaches 55°, above the 40° minimum.
     const a = assessed({ norad: AO91, rise: 0, set: 12, maxEl: 70, above: [3, 9], sun: [sunlit(0, 5, 55), dark(5, 12, 70)] });
     expect(a.sunlight).toBe('partly-eclipsed');
     expect(a.verdict).toBe('eligible');
-    expect(a.operating).toEqual(iv(3, 5)); // above-threshold ∩ sunlit
+    expect(a.envelope).toEqual(iv(0, 12)); // the full pass is the envelope ...
+    expect(a.operatingIntervals).toEqual([iv(0, 5)]); // ... but only the sunlit part is permitted operating time
+    expect(a.operatingMs).toBe(5 * MIN);
     expect(a.fullMaxElevationDeg).toBe(70);
     expect(a.eligibleMaxElevationDeg).toBe(55);
   });
-  it('shadow that covers only the part ABOVE the threshold excludes the pass', () => {
+  it('a high peak that occurs only in shadow does NOT qualify the pass, even if some sunlit time exists', () => {
+    // Lit for 0-4 min but only reaching 39°; the 70° peak is in shadow.
     const a = assessed({ norad: AO91, rise: 0, set: 12, maxEl: 70, above: [4, 8], sun: [sunlit(0, 4, 39), dark(4, 12, 70)] });
     expect(a.verdict).toBe('excluded');
     expect(a.exclusion).toBe('eclipse');
+    expect(a.operatingIntervals).toEqual([]);
+  });
+  it('eclipsed time is never included in operating time, even for a qualifying pass with several sunlit pieces', () => {
+    const a = assessed({ norad: AO91, rise: 0, set: 12, maxEl: 70, sun: [sunlit(0, 3, 45), dark(3, 6, 70), sunlit(6, 12, 60)] });
+    expect(a.verdict).toBe('eligible');
+    expect(a.operatingIntervals).toEqual([iv(0, 3), iv(6, 12)]);
+    expect(a.operatingMs).toBe(9 * MIN); // 12 min pass minus 3 min in shadow
   });
   it('LOCAL darkness is irrelevant: only satellite sunlight matters (no local-time input exists)', () => {
     // An evening pass with the satellite lit is fully eligible regardless of the clock time.
     const a = assessed({ norad: AO91, rise: 3 * 60 + 5, set: 3 * 60 + 17, maxEl: 60, above: [3 * 60 + 9, 3 * 60 + 13] });
     expect(a.verdict).toBe('eligible');
-    expect(at(0)).toBeLessThan(a.operating!.start);
+    expect(at(0)).toBeLessThan(a.envelope.start);
   });
   it('a non-sunlight-dependent repeater ignores eclipse entirely', () => {
     const a = assessed({ norad: SO50, rise: 0, set: 12, maxEl: 70, above: [4, 8], sun: [[0, 12, false, 70]] });

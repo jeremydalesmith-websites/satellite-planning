@@ -106,14 +106,15 @@ export interface PredictionMeta {
 }
 
 export interface Suggestion {
-  kind: 'lower-elevation' | 'fewer-opportunities' | 'longer-event' | 'more-availability';
+  kind: 'lower-elevation' | 'fewer-opportunities' | 'longer-span' | 'more-availability';
   text: string;
   windows: number;
 }
 
 export interface Diagnosis {
   availabilityBlocks: number;
-  blocksLongEnough: number;
+  /** Availability blocks that can hold at least one qualifying pass from AOS to LOS. */
+  blocksHoldingAPass: number;
   eligiblePasses: number;
   suggestions: Suggestion[];
 }
@@ -207,34 +208,34 @@ export function diagnose(
   blocks: readonly Interval[],
 ): Diagnosis {
   const { criteria } = inputs;
-  const D = criteria.durationMin * 60_000;
   const suggestions: Suggestion[] = [];
-  const count = (as: readonly PassAssessment[], av: readonly Interval[], dur: number, min: number) =>
-    findEventWindows(as, av, { durationMin: dur / 60_000, minOpportunities: min }).length;
+  const count = (as: readonly PassAssessment[], av: readonly Interval[], spanMin: number, min: number) =>
+    findEventWindows(as, av, { maxSpanMin: spanMin, minOpportunities: min }).length;
+  const eligible = assessments.filter((a) => a.verdict === 'eligible');
 
   if (criteria.minOpportunities > 2) {
-    const n = count(assessments, blocks, D, criteria.minOpportunities - 1);
-    if (n > 0) suggestions.push({ kind: 'fewer-opportunities', windows: n, text: `Requiring ${criteria.minOpportunities - 1} opportunities instead of ${criteria.minOpportunities} would give ${n} window${n === 1 ? '' : 's'}.` });
+    const n = count(assessments, blocks, criteria.maxSpanMin, criteria.minOpportunities - 1);
+    if (n > 0) suggestions.push({ kind: 'fewer-opportunities', windows: n, text: `Requiring ${criteria.minOpportunities - 1} passes instead of ${criteria.minOpportunities} would give ${n} cluster${n === 1 ? '' : 's'}.` });
   }
   const lower = Math.max(MIN_ELEVATION_INPUT_DEG, criteria.minElevationDeg - 10);
   if (lower < criteria.minElevationDeg) {
     const lowAs = assessAll(passes, statuses, lower);
-    const n = count(lowAs, blocks, D, criteria.minOpportunities);
-    if (n > 0) suggestions.push({ kind: 'lower-elevation', windows: n, text: `Lowering the minimum elevation to ${lower}° would give ${n} window${n === 1 ? '' : 's'}.` });
+    const n = count(lowAs, blocks, criteria.maxSpanMin, criteria.minOpportunities);
+    if (n > 0) suggestions.push({ kind: 'lower-elevation', windows: n, text: `Lowering the minimum peak elevation to ${lower}° would give ${n} cluster${n === 1 ? '' : 's'}.` });
   }
   const longest = Math.max(...EVENT_DURATIONS_MIN);
-  if (criteria.durationMin < longest) {
-    const n = count(assessments, blocks, longest * 60_000, criteria.minOpportunities);
-    if (n > 0) suggestions.push({ kind: 'longer-event', windows: n, text: `A ${longest / 60}-hour event would give ${n} window${n === 1 ? '' : 's'}.` });
+  if (criteria.maxSpanMin < longest) {
+    const n = count(assessments, blocks, longest, criteria.minOpportunities);
+    if (n > 0) suggestions.push({ kind: 'longer-span', windows: n, text: `A ${longest / 60}-hour maximum cluster span would give ${n} cluster${n === 1 ? '' : 's'}.` });
   }
   const everything: Interval[] = [inputs.range];
-  const nAll = count(assessments, everything, D, criteria.minOpportunities);
-  if (nAll > 0) suggestions.push({ kind: 'more-availability', windows: nAll, text: `The passes exist (${nAll} window${nAll === 1 ? '' : 's'} at some hour), but not inside your selected availability. Adding more days or periods would help.` });
+  const nAll = count(assessments, everything, criteria.maxSpanMin, criteria.minOpportunities);
+  if (nAll > 0) suggestions.push({ kind: 'more-availability', windows: nAll, text: `The passes exist (${nAll} cluster${nAll === 1 ? '' : 's'} at some hour), but not entirely inside your selected availability. Adding more days or periods would help.` });
 
   return {
     availabilityBlocks: blocks.length,
-    blocksLongEnough: blocks.filter((b) => b.end - b.start >= D).length,
-    eligiblePasses: assessments.filter((a) => a.verdict === 'eligible').length,
+    blocksHoldingAPass: blocks.filter((b) => eligible.some((a) => a.riseMs >= b.start && a.setMs <= b.end)).length,
+    eligiblePasses: eligible.length,
     suggestions,
   };
 }

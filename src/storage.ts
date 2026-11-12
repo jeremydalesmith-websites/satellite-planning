@@ -1,7 +1,7 @@
 /** Browser localStorage wrappers. Every access is guarded: storage can be blocked, full, or empty. */
 import { emptyAvailability, PERIOD_IDS } from './availability/availability.ts';
 import type { AvailabilitySettings } from './availability/availability.ts';
-import { isSavedEvent } from './saved/saved.ts';
+import { isLegacySavedEvent, isSavedEvent } from './saved/saved.ts';
 import type { SavedEvent } from './saved/saved.ts';
 
 const PREFS_KEY = 'satplanner.prefs.v1';
@@ -72,11 +72,27 @@ export function savePrefs(p: Prefs): boolean {
   return write(PREFS_KEY, p);
 }
 
-export function loadEvents(): SavedEvent[] {
+function rawEvents(): unknown[] {
   const list = read(EVENTS_KEY);
-  return Array.isArray(list) ? list.filter(isSavedEvent) : [];
+  return Array.isArray(list) ? list : [];
 }
 
+/** Events in the current format. Entries from the earlier fixed-window model are neither shown nor re-checked. */
+export function loadEvents(): SavedEvent[] {
+  return rawEvents().filter(isSavedEvent);
+}
+
+/** How many entries from the earlier fixed-window model are still stored (left untouched until the user removes them). */
+export function countLegacyEvents(): number {
+  return rawEvents().filter(isLegacySavedEvent).length;
+}
+
+/** Saves the current list. Old-format entries already in storage are preserved as they are; nothing is deleted here. */
 export function saveEvents(events: SavedEvent[]): boolean {
-  return write(EVENTS_KEY, events);
+  return write(EVENTS_KEY, [...rawEvents().filter(isLegacySavedEvent), ...events]);
+}
+
+/** Explicit, user-requested removal of the old-format entries only. Returns false if storage was unavailable. */
+export function clearLegacyEvents(): boolean {
+  return write(EVENTS_KEY, rawEvents().filter(isSavedEvent));
 }

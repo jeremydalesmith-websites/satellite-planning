@@ -26,7 +26,7 @@ describe('form validation messages', () => {
   it('accepts a complete form', () => {
     const r = validateForm(good(), NOW);
     expect(r.errors).toEqual([]);
-    expect(r.inputs!.criteria).toEqual({ minElevationDeg: 40, durationMin: 150, minOpportunities: 3 });
+    expect(r.inputs!.criteria).toEqual({ minElevationDeg: 40, maxSpanMin: 150, minOpportunities: 3 });
   });
   it('never infers a location: blank coordinates are errors', () => {
     const r = validateForm({ ...good(), latText: '', lonText: '' }, NOW);

@@ -2,9 +2,9 @@
 
 A static web app that answers one question:
 
-> During the next several weeks, when are we available for a two-to-three-hour club
-> event containing **multiple usable FM amateur-radio satellite passes** above my
-> chosen elevation?
+> During the next several weeks, when are we available for a cluster of **multiple FM
+> amateur-radio satellite passes**, each reaching at least my chosen peak elevation, all within
+> a maximum span of two to three hours?
 
 It is a **planner, not a tracker**: no live tracking, globe, Doppler, radio/rotator
 control, logging, accounts or notifications. Everything runs in your browser;
@@ -39,23 +39,23 @@ the stated limitation or only partial automated coverage; **Not yet** = delibera
 
 | # | Requirement | Status | Evidence | Limitations |
 |---|---|---|---|---|
-| 1 | Find clusters of usable FM passes inside my availability; search up to 42 days, marked provisional | Done | `cluster`, `availability`, `planner` | "Tentative/provisional" are wording tiers (>7 / >28 days past the elements epoch), not accuracy figures |
+| 1 | Find clusters of qualifying FM passes inside my availability; search up to 42 days, marked provisional | Done | `cluster`, `availability`, `planner` | "Tentative/provisional" are wording tiers (>7 / >28 days past the elements epoch), not accuracy figures |
 | 2a | TypeScript, Vite, React, `satellite.js`, phone + desktop | Done | build, typecheck, browser check | Phone layout verified in a 390 px Chromium window only, not on real devices |
 | 2b | Static, GitHub Pages-compatible, configurable sub-directory | Done | `scripts/e2e-basepath.mjs`: 18/18 checks under `/satellites/` (relative and absolute base) and `/tools/sat/` | Not published; the mapping of `/satellites/` to this repository is a deployment-phase decision (see below) |
 | 2c | Local storage for preferences and saved events | Done | `ui` tests, browser reload check | Per-browser only; cleared if the user clears site data |
 | 2d | Scheduled GitHub Actions data refresh | **Not yet** | `scripts/refresh-data.ts` works by hand | No workflow in this phase (Phase 3, needs approval) |
 | 2e | No Firebase/DB/auth/paid API/LLM; no secrets in frontend | Done | code review | The refresh script sends a generic User-Agent |
 | 3 | FM repeaters only, 2 m/70 cm cross-band, V/U and U/V; extensible internal model | Done | `planner` (catalog) | `ActivityKind` has one value today; SSTV etc. deliberately not built |
-| 4 | Inputs: location (manual + optional button), timezone, date range, min elevation, duration, min opportunities, validation | Done* | `ui` (validation, defaults, geolocation never called unprompted), `availability` | Real browser geolocation not tested; minimum opportunities accepts 2 to 10 (not 1); elevation limited to 5 to 85 degrees |
-| 5 | Weekly Sun-Sat x Morning/Midday/Evening grid; editable boundaries; merge adjacent; whole event must fit; explicit selection; accessible | Done* | `availability`, `ui` | Periods cannot cross midnight; touch usability not tested on real phones; a period boundary inside a spring-forward gap snaps to the moment the clocks jump |
+| 4 | Inputs: location (manual + optional button), timezone, date range, min peak elevation, maximum cluster span, min opportunities, validation | Done* | `ui` (validation, defaults, geolocation never called unprompted), `availability` | Real browser geolocation not tested; minimum opportunities accepts 2 to 10 (not 1); elevation limited to 5 to 85 degrees |
+| 5 | Weekly Sun-Sat x Morning/Midday/Evening grid; editable boundaries; merge adjacent; the whole cluster must fit; explicit selection; accessible | Done* | `availability`, `ui` | Periods cannot cross midnight; touch usability not tested on real phones; a period boundary inside a spring-forward gap snaps to the moment the clocks jump |
 | 6 | Local SGP4 predictions with refined rise/peak/set/threshold/eclipse; three timestamps; Worker | Done | `predict` (vs 1 s brute force), `docs/VALIDATION.md` (vs Skyfield) | No confidence intervals (intended); observer height fixed at 0; no terrain mask; eclipse boundaries are sampled every 5 s, so a shadow shorter than 5 s inside one pass could be missed (none found in 5,028 real passes) |
 | 7a | Curated catalog in three separate layers with sources | Done* | `planner` (catalog) | Frequencies/restrictions are hand-copied from one AMSAT page dated 2026-10-31. "Status timestamp/explanation" is held per restriction (`asOf`, text) plus a catalog-wide review date, not as per-satellite fields |
 | 7b | AMSAT activity ingestion; FM-mode matching; four operating states; strict counting | Done | `ingest`, `eligibility` | Reports are volunteer observations; whether an operator filed under the right mode cannot be verified |
 | 8 | Sunlight at the satellite, partial eclipse, eligible-portion elevation, explained exclusions | Done* | `eligibility`, `planner` (ISS real-orbit tests), Skyfield comparison | Only AO-91 is flagged sunlight-dependent (only it has a cited source); any penumbra counts as not sunlit |
-| 9 | Cluster finder: non-overlapping count, fit-inside rule, consolidation, ranking, honest empty results | Done | `cluster`, `planner` (vs minute-by-minute reference) | Conservative single-station rule; touching passes count as sequential with no setup gap |
+| 9 | Cluster finder: full-pass non-overlapping count, maximum span, availability fit, duplicate removal, ranking, honest empty results | Done | `cluster`, `planner` (vs an independent brute-force reference) | Conservative single-station rule; touching passes count as sequential with no setup gap |
 | 10 | Event cards and pass cards with all required fields | Done* | browser check, screenshots | `EventCard`, `PassCard` and the timeline have no component tests; the timeline is decorative (`aria-hidden`) with the same information in text |
-| 11 | Saved events stay fixed; recomputed; changes and minimum warning | Done* | `saved` | Re-checked when the Saved tab is opened (not on app load); local to one browser |
-| 12 | Separate testable modules; required test list; independent validation | Done* | 180 tests; `docs/VALIDATION.md` | Skyfield validation needs Python and is not in `npm test`; it checks the implementation, not real-world accuracy |
+| 11 | Saved events stay fixed; recomputed; changes and minimum warning | Done* | `saved` | Re-checked when the Saved tab is opened (not on app load); local to one browser. Events saved by an earlier version (fixed-window model) are not re-interpreted: they are left untouched in storage, not shown, and removable on request |
+| 12 | Separate testable modules; required test list; independent validation | Done* | 244 tests; `docs/VALIDATION.md` | Skyfield validation needs Python and is not in `npm test`; it checks the implementation, not real-world accuracy |
 | 13 | README (dev, test, deploy, data, catalog, limits, deferred) | Done | this file | |
 
 ## Local development
@@ -92,14 +92,14 @@ Other scripts: `npm run typecheck`, `npm run build`, `npm run preview`,
 npm test
 ```
 
-180 tests, no network needed. They use **clearly labelled fixtures**: real AMSAT
+244 tests, no network needed. They use **clearly labelled fixtures**: real AMSAT
 elements and status reports frozen on 2026-11-12 in `tests/fixtures/`, plus
 synthetic geometry in `tests/factory.ts` where an exact boundary is needed.
 They cover elevation-threshold boundaries; partial eclipse and local-night vs
 satellite-sunlight; adjacent availability periods; time zones and DST
 (spring-forward, fall-back, southern hemisphere); overlapping passes;
-event-edge handling; repeated passes of one satellite; unknown/stale status;
-duplicate-window consolidation; saved events staying fixed; empty results and
+cluster bounds, maximum span and availability fit; repeated passes of one satellite; unknown/stale status;
+duplicate-cluster removal; saved events staying fixed; empty results and
 unavailable data; and form validation / accessibility of the availability grid.
 
 Independent validation against Skyfield is documented in
@@ -188,36 +188,47 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
 
 ## How passes are counted
 
-* A **pass** runs from rise to set at 0° elevation (flat horizon, observer at
-  sea level; terrain and obstructions are not modelled).
-* **Time above your elevation** = when elevation ≥ your threshold.
-* **Operating interval** = the stretch that is above your threshold **and**
-  operationally eligible (sunlit, for sunlight-dependent repeaters). If a
-  shadow splits it, the longest piece is used. A pass **qualifies** only if
-  such an interval exists, i.e. the threshold is reached during an eligible
-  portion. The card shows the full-pass maximum and, when different, the
-  highest *usable* point.
+* **Full pass (AOS to LOS).** A pass runs from rise to set at 0° elevation (flat horizon, observer at
+  sea level; terrain and obstructions are not modelled). This whole interval is the pass's **envelope**.
+  Cluster bounds, availability fit and the one-station overlap rule all use the full pass.
+* **Minimum elevation selects a pass by its MAXIMUM elevation.** "Include passes that reach at least X°."
+  It does not mean only the part above X° can be operated; no low-elevation cutoff or terrain mask exists.
+  For a sunlight-dependent repeater (AO-91) the elevation must be reached **during a sunlit portion**: a high
+  peak while the repeater may not be used does not qualify the pass.
+* **Permitted operating time** is separate from the pass. It is the whole pass for an unrestricted repeater and
+  only the sunlit portions for a sunlight-dependent one. Eclipsed time is never part of anything labelled
+  operating time. "Time above X°" is shown in Details as information only; it selects and schedules nothing.
 * **Sunlight** is sunlight *at the satellite* (satellite.js `sunPos` +
   `shadowFraction`), never local daylight. A night-time event can have a lit
   satellite. Any penumbra counts as not lit. Only AO-91 is flagged
   sunlight-dependent, because AMSAT's FM page asks for no use in eclipse.
-* **Overlap rule (one operating station, no setup gap).** In a window, the
-  planner counts the **largest set of strictly non-overlapping operating
-  intervals** (touching end-to-start is allowed). Ties go to more total
-  operating time, then higher summed elevations. Fully simultaneous passes are
-  never double-counted; overlapping passes are shown as *alternatives*.
-* **Fit rule.** A pass counts only if its *whole* operating interval is inside
-  the event. A pass cut by the event edge is listed as "runs past event edge",
-  not counted.
-* **Availability.** The event must lie entirely inside one merged availability
-  block (Midday + Evening merge into one block). Period boundaries are local
-  wall-clock times in the selected zone, converted per day with Luxon, so DST is
-  handled. Periods cannot cross midnight.
-* **Ranking:** (1) number of opportunities, (2) total operating time,
-  (3) sum of maximum elevations, (4) earlier start. There is no opaque score.
-  Windows with the same set of passes are consolidated into one tidy
-  (15-minute-aligned) start; windows overlapping a better one by ≥50% are
-  folded into it ("N nearly identical windows folded").
+* **Cluster.** A cluster is a set of counted passes. Its start is the earliest full-pass AOS and its end the
+  latest full-pass LOS among them (by timestamp), so its duration is the elapsed time between those endpoints,
+  gaps included. Nothing is padded and there are no setup, arrival or departure buffers. The header shows exactly
+  these bounds (rounded outward to the second, so it never appears to exclude part of a pass) and the duration.
+* **Maximum cluster span.** The selected 2 / 2.5 / 3 hours is a *limit*, not a required or padded event length:
+  a 20-minute cluster qualifies for a two-hour maximum. The cluster's span (AOS to LOS) must not exceed it.
+* **Availability.** The whole AOS-to-LOS cluster must lie inside one merged availability block (Midday +
+  Evening merge into one block). A pass that begins before or ends after the block does not count, even if
+  its peak is inside. Period boundaries are local wall-clock times in the selected zone, converted per day with
+  Luxon, so DST is handled. Periods cannot cross midnight.
+* **Overlap rule (one operating station, no setup gap; conservative).** Two passes conflict if their **full
+  AOS-to-LOS envelopes overlap**, even if they overlap only at low elevation. Touching end-to-start is allowed.
+  The planner counts the largest set of pairwise non-overlapping passes in a cluster. Ties go to more total
+  permitted operating time (never including eclipsed time, never double-counted, since counted passes do not
+  overlap), then higher summed peak elevations. Overlapping qualifying passes inside the cluster are shown as
+  *alternatives*, not as independent opportunities. This is deliberately conservative: it can count fewer
+  passes than an operator who works two low-elevation tails could manage.
+* **Ranking:** (1) number of passes, (2) total permitted operating time, (3) sum of maximum elevations,
+  (4) earlier start. There is no opaque score. Clusters with exactly the same counted passes appear once.
+  Distinct sets are all kept: a shorter cluster with fewer passes is a separate result next to a longer one.
+  At most 25 clusters are shown.
+* **Saved events.** A new event stores the actual cluster interval from its header and is re-checked against
+  that fixed interval (`schema: 2`). A pass that drifts so its full pass crosses the saved edge is flagged,
+  not followed. Because the saved edges are exact AOS/LOS instants, a pass within 2 seconds of them still counts as
+  inside (recomputing the same pass moves its edges by tens of milliseconds, which is not drift). Events saved by an earlier version (`schema: 1`, the fixed-window model) are never
+  re-interpreted: they are left untouched in storage, not shown or re-checked, and the Saved tab offers an explicit
+  "Remove" for them.
 * **Strict eligibility.** A satellite is considered **only** if its exact FM repeater entry has a
   "Heard" report in the rolling last 72 hours, measured back from the time of the search (or of the
   saved-event re-check), with no newer negative report. A satellite without that evidence is left
@@ -355,6 +366,7 @@ checks. **A review by an AI, even a clean one, is not proof of correctness**; it
 the original tests had missed, which is the point of asking.
 
 Fixed (each first reproduced by a failing test):
+* (Historical: padded windows were later removed in favour of exact full-pass clusters.)
 * **Window could start up to a second before its availability block** (a rounding fallback in
   `tidyStart` could leave `[lo, hi]`; the tidy window was never re-checked against the block).
   Clamped, and a tidy window is now accepted only if it stays inside the block.
@@ -429,12 +441,12 @@ src/
   orbit/         predict.ts (satellite.js) · worker + client · horizon labels
   eligibility/   status.ts (activity reports → state) · assess.ts (pass + sunlight)
   availability/  weekly grid → absolute intervals (Luxon)
-  cluster/       non-overlapping selection, window search, consolidation, ranking
-  saved/         snapshots, fixed-window re-check, change comparison
+  cluster/       full-pass non-overlap selection, cluster search, duplicate removal, ranking
+  saved/         snapshots (schema 2), fixed-interval re-check, change comparison
   planner.ts     orchestration + "no results" diagnosis
   ui/            React components and styles
 scripts/         refresh-data.ts · smoke.ts · serve-subdir.mjs · e2e-smoke.mjs
 validation/      independent Skyfield comparison
-tests/           180 tests + labelled fixtures
+tests/           244 tests + labelled fixtures
 CLAUDE.md          working agreements for contributors
 ```

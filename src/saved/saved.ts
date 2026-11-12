@@ -1,19 +1,25 @@
 /**
- * Saved events: a FIXED event window plus a snapshot of why it was chosen.
+ * Saved events: a FIXED cluster interval plus a snapshot of why it was chosen.
  *
- * When data refreshes, `recheckEvent` re-evaluates the SAME window with the
- * SAME criteria against newly computed passes and reports what changed. It
- * never moves, resizes or deletes the event: the gathering is a human
- * commitment, so only the evidence is recomputed.
+ * A new event stores the actual cluster interval shown in its header (earliest full-pass AOS to latest
+ * full-pass LOS of the counted passes). When data refreshes, `recheckEvent` re-evaluates that SAME interval with
+ * the SAME criteria against newly computed passes and reports what changed. It never moves, resizes or deletes
+ * the event: the gathering is a human commitment, so only the evidence is recomputed. A pass that drifts so
+ * that its full pass is no longer inside the saved interval is flagged, not followed.
+ *
+ * Format version: `schema: 2` marks the full-pass cluster model. Events saved under the earlier fixed-window
+ * model (`schema: 1`) are NOT re-interpreted: they are left untouched in storage and are not shown or re-checked.
  */
 import { SAVED_ELEVATION_REPORT_DEG, SAVED_MATCH_TOLERANCE_MIN, SAVED_SHIFT_REPORT_SEC } from '../domain/policy.ts';
 import type { Criteria, Interval, Ms } from '../domain/types.ts';
 import type { PassAssessment } from '../eligibility/assess.ts';
 import { exclusionReason } from '../eligibility/status.ts';
 import type { StatusState } from '../eligibility/status.ts';
-import { evaluateWindow } from '../cluster/cluster.ts';
+import { evaluateFixedInterval } from '../cluster/cluster.ts';
 import type { EventWindow, WindowEvaluation } from '../cluster/cluster.ts';
 import type { PredictionMeta } from '../planner.ts';
+
+export const SAVED_SCHEMA = 2 as const;
 
 export interface SavedOpportunity {
   noradId: number;
@@ -21,16 +27,18 @@ export interface SavedOpportunity {
   riseMs: Ms;
   peakMs: Ms;
   setMs: Ms;
-  operating: Interval;
+  /** Permitted operating time within the pass when saved (no eclipsed time). */
+  operatingMs: number;
   fullMaxElevationDeg: number;
   eligibleMaxElevationDeg: number | null;
   statusState: StatusState;
 }
 
 export interface SavedEvent {
-  schema: 1;
+  schema: typeof SAVED_SCHEMA;
   id: string;
   savedAtMs: Ms;
+  /** The fixed cluster interval exactly as displayed in the header when saved. */
   window: Interval;
   location: { latDeg: number; lonDeg: number };
   timeZone: string;
@@ -50,7 +58,7 @@ function toSaved(a: PassAssessment): SavedOpportunity {
     riseMs: a.riseMs,
     peakMs: a.peakMs,
     setMs: a.setMs,
-    operating: { ...a.operating! },
+    operatingMs: a.operatingMs,
     fullMaxElevationDeg: a.fullMaxElevationDeg,
     eligibleMaxElevationDeg: a.eligibleMaxElevationDeg,
     statusState: a.status.state,
@@ -67,7 +75,7 @@ export function snapshotEvent(
   id: string = `ev-${nowMs.toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
 ): SavedEvent {
   return {
-    schema: 1,
+    schema: SAVED_SCHEMA,
     id,
     savedAtMs: nowMs,
     window: { ...w.window },
@@ -121,7 +129,7 @@ const fmtShift = (sec: number) => {
  * `assessments` must have been computed with the event's own criteria.
  */
 export function recheckEvent(saved: SavedEvent, assessments: readonly PassAssessment[]): Recheck {
-  const evaluation = evaluateWindow(saved.window, assessments);
+  const evaluation = evaluateFixedInterval(saved.window, assessments);
   const tolerance = SAVED_MATCH_TOLERANCE_MIN * 60_000;
   const universe: Array<{ a: PassAssessment; where: 'counted' | 'alternative' | 'edge' | 'excluded' }> = [
     ...evaluation.counted.map((a) => ({ a, where: 'counted' as const })),
@@ -145,15 +153,15 @@ export function recheckEvent(saved: SavedEvent, assessments: readonly PassAssess
         changes.push({ kind: 'eligibility', text: `${old.name} pass no longer counts: ${reason}. The saved date and time have not moved.` });
         continue;
       }
-      changes.push({ kind: 'lost', text: `${old.name} pass no longer appears: it no longer reaches ${saved.criteria.minElevationDeg}° within this event.` });
+      changes.push({ kind: 'lost', text: `${old.name} pass no longer appears: it no longer reaches ${saved.criteria.minElevationDeg}° near this time.` });
       continue;
     }
     matchedNow.add(m.a.passId);
     if (m.where !== 'counted') {
       const why: Record<string, string> = {
         alternative: 'it now overlaps another counted pass',
-        edge: 'its usable part now extends past the event start or end',
-        excluded: m.a.reasons[0] ?? 'it is no longer usable',
+        edge: 'its full pass now extends outside the saved interval',
+        excluded: m.a.reasons[0] ?? 'it no longer qualifies',
       };
       changes.push({ kind: 'lost', text: `${old.name} pass no longer counts: ${why[m.where]}` });
       continue;
@@ -186,10 +194,18 @@ export function recheckEvent(saved: SavedEvent, assessments: readonly PassAssess
   };
 }
 
-/** Validate untrusted JSON from localStorage before use. */
+const hasBasics = (e: Partial<SavedEvent> | null): e is Partial<SavedEvent> =>
+  !!e && typeof e.id === 'string' && !!e.window && Number.isFinite(e.window.start) && Number.isFinite(e.window.end) &&
+  !!e.criteria && !!e.original && Array.isArray(e.original.counted) && !!e.location && typeof e.timeZone === 'string';
+
+/** Validate untrusted JSON from localStorage before use. Only the current (schema 2) format is accepted. */
 export function isSavedEvent(x: unknown): x is SavedEvent {
   const e = x as Partial<SavedEvent> | null;
-  return !!e && e.schema === 1 && typeof e.id === 'string' && !!e.window && Number.isFinite(e.window.start) &&
-    Number.isFinite(e.window.end) && !!e.criteria && !!e.original && Array.isArray(e.original.counted) &&
-    !!e.location && typeof e.timeZone === 'string';
+  return hasBasics(e) && e.schema === SAVED_SCHEMA && typeof e.criteria!.maxSpanMin === 'number';
+}
+
+/** An event saved under the earlier fixed-window model (schema 1). Recognised only so it can be left alone and counted. */
+export function isLegacySavedEvent(x: unknown): boolean {
+  const e = x as { schema?: unknown } | null;
+  return !!e && typeof e === 'object' && e.schema === 1;
 }

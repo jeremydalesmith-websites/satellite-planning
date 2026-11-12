@@ -56,7 +56,12 @@ export type BandLetter = 'V' | 'U';
 export type BandConfig = 'V/U' | 'U/V';
 
 export interface Criteria {
+  /** A pass is selected when its MAXIMUM elevation reaches this (during a sunlit portion, for sunlight-dependent repeaters). */
   minElevationDeg: number;
-  durationMin: number;
+  /**
+   * Maximum permitted span of a cluster, minutes: from the earliest full-pass AOS to the latest full-pass LOS
+   * among the counted passes, gaps included. It is a limit, not a required or padded event duration.
+   */
+  maxSpanMin: number;
   minOpportunities: number;
 }

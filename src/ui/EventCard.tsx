@@ -1,10 +1,10 @@
-import { overlaps } from '../domain/intervals.ts';
+import { envelopesOverlap } from '../cluster/cluster.ts';
 import type { EventWindow } from '../cluster/cluster.ts';
 import type { Criteria } from '../domain/types.ts';
 import type { PredictionMeta } from '../planner.ts';
 import { PassCard } from './PassCard.tsx';
 import { Timeline } from './Timeline.tsx';
-import { fmtDay, fmtTime, tzAbbrev } from './format.ts';
+import { fmtDay, fmtEndSec, fmtSpan, fmtStartSec, tzAbbrev } from './format.ts';
 
 interface Props {
   event: EventWindow;
@@ -16,14 +16,18 @@ interface Props {
   onSave: () => void;
 }
 
+/**
+ * One cluster. The header shows the ACTUAL cluster: earliest full-pass AOS to latest full-pass LOS of the counted
+ * passes, and the elapsed time between them (gaps included). Bounds are rounded outward to the second so the header
+ * never appears to exclude part of a counted pass. The selected hours are only a maximum span, never padded in.
+ */
 export function EventCard({ event: e, rank, tz, criteria, meta, saved, onSave }: Props) {
   const overlapNames = (id: string) => {
     const a = e.alternatives.find((x) => x.passId === id)!;
-    return e.counted.filter((c) => overlaps(c.operating!, a.operating!)).map((c) => c.name);
+    return e.counted.filter((c) => envelopesOverlap(c, a)).map((c) => c.name);
   };
-  const dur = (e.window.end - e.window.start) / 3_600_000;
   const ok = e.counted.length >= criteria.minOpportunities;
-  const hasMore = e.alternatives.length + e.edge.length + e.excluded.length > 0 || e.similarWindows > 0;
+  const hasMore = e.alternatives.length + e.excluded.length > 0;
 
   return (
     <section className="card event" aria-labelledby={`ev-${rank}`}>
@@ -32,7 +36,7 @@ export function EventCard({ event: e, rank, tz, criteria, meta, saved, onSave }:
           <p className="rank">Option {rank}</p>
           <h3 id={`ev-${rank}`}>{fmtDay(e.window.start, tz)}</h3>
           <p className="when">
-            <strong>{fmtTime(e.window.start, tz)} – {fmtTime(e.window.end, tz)}</strong> {tzAbbrev(e.window.start, tz)} · {dur} hours
+            <strong>{fmtStartSec(e.window.start, tz)} – {fmtEndSec(e.window.end, tz)}</strong> {tzAbbrev(e.window.start, tz)} · {fmtSpan(e.window.start, e.window.end)}
           </p>
         </div>
         <button type="button" className={saved ? 'secondary saved' : 'primary'} onClick={onSave} aria-pressed={saved}>
@@ -53,19 +57,15 @@ export function EventCard({ event: e, rank, tz, criteria, meta, saved, onSave }:
       {hasMore && (
         <details className="more">
           <summary>Details</summary>
-          {e.similarWindows > 0 && (
-            <p className="hint small">{e.similarWindows} nearly identical window{e.similarWindows === 1 ? '' : 's'} (same day, mostly overlapping) folded into this one.</p>
-          )}
           {e.alternatives.length > 0 && (
             <>
               <h4 className="group">{e.alternatives.length} overlapping alternative{e.alternatives.length === 1 ? '' : 's'}</h4>
               {e.alternatives.map((p) => <PassCard key={p.passId} pass={p} role="alternative" tz={tz} overlapNames={overlapNames(p.passId)} statusDownloadedAt={meta.statusDownloadedAt} />)}
             </>
           )}
-          {(e.edge.length > 0 || e.excluded.length > 0) && (
+          {e.excluded.length > 0 && (
             <>
               <h4 className="group">Other passes left out</h4>
-              {e.edge.map((p) => <PassCard key={p.passId} pass={p} role="edge" tz={tz} window={e.window} statusDownloadedAt={meta.statusDownloadedAt} />)}
               {e.excluded.map((p) => <PassCard key={p.passId} pass={p} role="excluded" tz={tz} statusDownloadedAt={meta.statusDownloadedAt} />)}
             </>
           )}

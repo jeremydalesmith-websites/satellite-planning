@@ -9,7 +9,7 @@ passes are counted, the policy constants, the data sources and the limits.
 ## Agreed scope (do not expand without explicit approval)
 In scope: FM repeaters only, cross-band 2 m / 70 cm, both V/U and U/V; location,
 timezone, date range (default 28 days, max 42), minimum peak elevation
-(default 40°), event duration (2 / 2.5 / 3 h), minimum opportunities (default 3,
+(default 40°), maximum cluster span (2 / 2.5 / 3 h), minimum opportunities (default 3,
 2 allowed), weekly Sun–Sat × Morning/Midday/Evening availability; cluster
 finder and ranking; saved events re-checked against fresh data.
 
@@ -51,9 +51,19 @@ in frontend code. Use `satellite.js` for orbital mechanics; do not hand-roll it.
 * Never silently lower the elevation threshold, add availability hours, or count
   unconfirmed satellites. Empty results explain themselves and only *suggest*.
 * Sunlight means sunlight **at the satellite**, never local daylight.
-* A pass counts only if its whole operating interval fits inside the event;
-  overlapping passes are shown as alternatives (one operating station).
-* Saved events never move; only their evidence is recomputed.
+* Minimum elevation **selects a pass by its maximum elevation**; it does not mean only the part above X° is
+  operable. A sunlight-dependent repeater must reach it during a sunlit portion. No terrain mask or adjustable
+  low-elevation cutoff exists. Do not reintroduce "usable time" wording: use "Full pass", "Sunlit operating
+  interval" and "Time above X°" (information only).
+* A cluster's bounds are the earliest full-pass AOS to the latest full-pass LOS of the counted passes (by timestamp),
+  duration = elapsed time between them. The selected hours are a MAXIMUM span, never padded; no setup/arrival
+  buffers. The whole cluster must fit inside one availability block.
+* One operating station, conservative: passes whose FULL AOS-to-LOS envelopes overlap conflict; overlapping passes
+  are shown as alternatives, never as independent opportunities. Operating time never includes eclipsed time.
+* Displayed bounds round outward to the second so a header never appears to exclude part of a counted pass.
+* Saved events never move; only their evidence is recomputed. New events (`schema: 2`) store the actual cluster
+  interval. Older `schema: 1` events are never re-interpreted: leave them untouched in storage; only the user may
+  remove them.
 * Do not claim second-level accuracy weeks ahead or invent confidence intervals.
 * Catalog entries (`src/catalog/catalog.ts`) are manual and sourced; label them
   as such. Only mark a repeater sunlight-dependent if a cited source says so.

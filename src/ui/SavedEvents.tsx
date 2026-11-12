@@ -5,20 +5,34 @@ import { recheckSavedEvent } from '../saved/recheck.ts';
 import type { SavedEvent } from '../saved/saved.ts';
 import { PassCard } from './PassCard.tsx';
 import { Timeline } from './Timeline.tsx';
-import { fmtDateTime, fmtDay, fmtTime, tzAbbrev } from './format.ts';
+import { fmtDateTime, fmtDay, fmtEndSec, fmtSpan, fmtStartSec, fmtTime, tzAbbrev } from './format.ts';
 
 interface Props {
   events: SavedEvent[];
   data: LoadedData | null;
   nowMs: number;
   onDelete: (id: string) => void;
+  /** Entries saved by an earlier version (fixed-window model): left untouched, not shown, removable on request. */
+  legacyCount?: number;
+  onClearLegacy?: () => void;
 }
 
-export function SavedEvents({ events, data, nowMs, onDelete }: Props) {
+function LegacyNotice({ count, onClear }: { count: number; onClear?: () => void }) {
+  if (count <= 0) return null;
+  return (
+    <p className="notice warn" role="note">
+      {count} saved event{count === 1 ? ' was' : 's were'} made with an earlier version of this planner (a different event model) and cannot be shown or re-checked here. {count === 1 ? 'It is' : 'They are'} still stored, untouched.
+      {onClear && <> <button type="button" className="link" onClick={onClear}>Remove {count === 1 ? 'it' : 'them'}</button></>}
+    </p>
+  );
+}
+
+export function SavedEvents({ events, data, nowMs, onDelete, legacyCount = 0, onClearLegacy }: Props) {
   if (events.length === 0) {
     return (
       <section className="card">
         <h2>Saved events</h2>
+        <LegacyNotice count={legacyCount} onClear={onClearLegacy} />
         <p>No saved events yet. Save one from the search results and it will be re-checked here against fresh data. The date and time you save never move on their own.</p>
       </section>
     );
@@ -27,8 +41,9 @@ export function SavedEvents({ events, data, nowMs, onDelete }: Props) {
   return (
     <section aria-labelledby="saved-title">
       <h2 id="saved-title">Saved events</h2>
+      <LegacyNotice count={legacyCount} onClear={onClearLegacy} />
       <p className="hint">
-        Each event keeps its saved date and time. Opening this page re-checks the 72-hour eligibility rule against the current time ({fmtDateTime(nowMs, events[0]!.timeZone)}) using the status reports already downloaded; it does not download new reports.
+        Each event keeps its saved cluster interval. Opening this page re-checks the 72-hour eligibility rule against the current time ({fmtDateTime(nowMs, events[0]!.timeZone)}) using the status reports already downloaded; it does not download new reports.
       </p>
       {sorted.map((ev) => <SavedCard key={ev.id} ev={ev} data={data} nowMs={nowMs} onDelete={() => onDelete(ev.id)} />)}
     </section>
@@ -38,7 +53,6 @@ export function SavedEvents({ events, data, nowMs, onDelete }: Props) {
 function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: LoadedData | null; nowMs: number; onDelete: () => void }) {
   const out = useMemo(() => recheckSavedEvent(ev, data, nowMs), [ev, data, nowMs]);
   const tz = ev.timeZone;
-  const dur = (ev.window.end - ev.window.start) / 3_600_000;
   const c = ev.criteria;
 
   return (
@@ -46,9 +60,11 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
       <header>
         <div>
           <h3>{fmtDay(ev.window.start, tz)}</h3>
-          <p className="when"><strong>{fmtTime(ev.window.start, tz)} – {fmtTime(ev.window.end, tz)}</strong> {tzAbbrev(ev.window.start, tz)} · {dur} hours</p>
+          <p className="when">
+            <strong>{fmtStartSec(ev.window.start, tz)} – {fmtEndSec(ev.window.end, tz)}</strong> {tzAbbrev(ev.window.start, tz)} · {fmtSpan(ev.window.start, ev.window.end)}
+          </p>
           <p className="hint small">
-            Needs {c.minOpportunities}+ passes at {c.minElevationDeg}°+ · location {ev.location.latDeg.toFixed(2)}, {ev.location.lonDeg.toFixed(2)} · saved {fmtDateTime(ev.savedAtMs, tz)}
+            Needs {c.minOpportunities}+ passes peaking at {c.minElevationDeg}°+ · location {ev.location.latDeg.toFixed(2)}, {ev.location.lonDeg.toFixed(2)} · saved {fmtDateTime(ev.savedAtMs, tz)}
           </p>
         </div>
         <button type="button" className="danger" onClick={onDelete}>Delete</button>
@@ -65,7 +81,7 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
 
       {out.ok && !out.passed && !out.recheck.meetsMinimum && (
         <p className="alert-box" role="alert">
-          <strong>Heads up:</strong> with current data this window has {out.recheck.countNow} qualifying pass{out.recheck.countNow === 1 ? '' : 'es'}, below the {c.minOpportunities} you asked for. The event has not been moved. You may want to search for an alternative.
+          <strong>Heads up:</strong> with current data this saved interval has {out.recheck.countNow} qualifying pass{out.recheck.countNow === 1 ? '' : 'es'}, below the {c.minOpportunities} you asked for. The event has not been moved. You may want to search for an alternative.
         </p>
       )}
       {out.ok && !out.passed && out.recheck.meetsMinimum && out.recheck.changes.length === 0 && (
@@ -90,11 +106,7 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
 
       {out.ok ? (
         <>
-          <Timeline
-            window={ev.window}
-            tz={tz}
-            items={out.recheck.evaluation.counted.map((pass) => ({ pass, kind: 'counted' as const }))}
-          />
+          <Timeline window={ev.window} tz={tz} items={out.recheck.evaluation.counted.map((pass) => ({ pass, kind: 'counted' as const }))} />
           <h4 className="group">Counted now</h4>
           {out.recheck.evaluation.counted.length === 0 && <p>None.</p>}
           {out.recheck.evaluation.counted.map((p) => (

@@ -8,24 +8,42 @@ export interface TimelineItem {
 }
 
 interface Props {
+  /** The actual cluster (or fixed saved) interval. The axis is scaled to it with modest padding. */
   window: Interval;
   items: TimelineItem[];
   tz: string;
 }
 
-/** Compact visual timeline. Decorative: the pass cards below carry the same information as text. */
+/** Pick a tick step that gives at most about six ticks across the cluster. */
+function tickStepMs(spanMs: number): number {
+  for (const min of [5, 10, 15, 30, 60, 120]) if (spanMs / (min * 60_000) <= 6) return min * 60_000;
+  return 180 * 60_000;
+}
+
+/**
+ * Compact visual timeline. Decorative: the pass cards below carry the same information as text.
+ * The axis is the cluster interval plus a small VISUAL pad; the pad never changes a displayed or saved boundary.
+ * Each lane shows the FULL pass (AOS to LOS). Where operation is permitted the bar is solid; portions where it is
+ * prohibited (Earth's shadow, for sunlight-dependent repeaters) are hatched, so the full pass is never implied to be
+ * available for transmission.
+ */
 export function Timeline({ window, items, tz }: Props) {
-  const span = window.end - window.start;
-  const pct = (t: number) => `${Math.min(100, Math.max(0, ((t - window.start) / span) * 100))}%`;
-  const hours: number[] = [];
-  const firstHour = Math.ceil(window.start / 1_800_000) * 1_800_000;
-  for (let t = firstHour; t < window.end; t += 1_800_000) hours.push(t);
-  const sorted = [...items].filter((i) => i.pass.operating).sort((a, b) => a.pass.operating!.start - b.pass.operating!.start);
+  const span = Math.max(1, window.end - window.start);
+  const pad = Math.max(span * 0.04, 60_000);
+  const lo = window.start - pad;
+  const hi = window.end + pad;
+  const total = hi - lo;
+  const pct = (t: number) => `${Math.min(100, Math.max(0, ((t - lo) / total) * 100))}%`;
+  const wpct = (a: number, b: number) => `calc(${pct(b)} - ${pct(a)})`;
+  const step = tickStepMs(span);
+  const ticks: number[] = [];
+  for (let t = Math.ceil(lo / step) * step; t <= hi; t += step) ticks.push(t);
+  const sorted = [...items].sort((a, b) => a.pass.riseMs - b.pass.riseMs);
 
   return (
     <div className="timeline" aria-hidden="true">
       <div className="tl-axis">
-        {hours.map((t) => (
+        {ticks.map((t) => (
           <span key={t} className="tick" style={{ left: pct(t) }}>
             <i />
             {fmtTime(t, tz)}
@@ -33,22 +51,25 @@ export function Timeline({ window, items, tz }: Props) {
         ))}
       </div>
       {sorted.map((it) => {
-        const o = it.pass.operating!;
-        const mid = (o.start + o.end) / 2;
-        const late = (mid - window.start) / span > 0.6;
+        const p = it.pass;
+        const mid = (p.riseMs + p.setMs) / 2;
+        const late = (mid - lo) / total > 0.62;
         return (
-          <div className="tl-lane" key={it.pass.passId}>
-            <span className="tl-pass" style={{ left: pct(Math.max(it.pass.riseMs, window.start)), width: `calc(${pct(Math.min(it.pass.setMs, window.end))} - ${pct(Math.max(it.pass.riseMs, window.start))})` }} />
-            <span className={`tl-op ${it.kind}`} style={{ left: pct(o.start), width: `max(6px, calc(${pct(o.end)} - ${pct(o.start)}))` }} />
-            <span className={`tl-label ${late ? 'before' : 'after'}`} style={late ? { right: `calc(100% - ${pct(o.start)} + 4px)` } : { left: `calc(${pct(o.end)} + 4px)` }}>
-              {it.pass.name} {it.pass.fullMaxElevationDeg.toFixed(0)}°
+          <div className="tl-lane" key={p.passId}>
+            <span className={`tl-full ${p.sunlightRestricted ? 'restricted' : 'open'}`} style={{ left: pct(p.riseMs), width: wpct(p.riseMs, p.setMs) }} />
+            {p.operatingIntervals.map((o, i) => (
+              <span key={i} className={`tl-op ${it.kind}`} style={{ left: pct(o.start), width: `max(4px, ${wpct(o.start, o.end)})` }} />
+            ))}
+            <span className={`tl-label ${late ? 'before' : 'after'}`} style={late ? { right: `calc(100% - ${pct(p.riseMs)} + 4px)` } : { left: `calc(${pct(p.setMs)} + 4px)` }}>
+              {p.name} {p.fullMaxElevationDeg.toFixed(0)}°
             </span>
           </div>
         );
       })}
       <div className="tl-legend">
-        <span><i className="sw counted" /> usable time</span>
-        <span><i className="sw line" /> whole pass</span>
+        {sorted.some((i) => !i.pass.sunlightRestricted) && <span><i className="sw counted" /> Full pass</span>}
+        {sorted.some((i) => i.pass.sunlightRestricted) && <span><i className="sw counted" /> Sunlit operating interval</span>}
+        {sorted.some((i) => i.pass.sunlightRestricted && i.pass.shadowMs > 0) && <span><i className="sw shadow" /> Not permitted (Earth’s shadow)</span>}
       </div>
     </div>
   );

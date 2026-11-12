@@ -125,7 +125,7 @@ describe('operating-pattern classification: interruptible vs activation-required
   const loud = (key: string) => mkFile({ [key]: { reports: Array.from({ length: 20 }, (_, i): [number, 'H', number] => [hAgo(1 + i), 'H', i]) } });
   const planWith = (status: StatusFile, norad: number) =>
     computePlan(
-      { observer: { latDeg: 0, lonDeg: 0, heightKm: 0 }, timeZone: 'UTC', criteria: { minElevationDeg: 40, durationMin: 150, minOpportunities: 1 }, availability: fullDay(), range: { start: at(-120), end: at(400) }, selectedNoradIds: [norad] },
+      { observer: { latDeg: 0, lonDeg: 0, heightKm: 0 }, timeZone: 'UTC', criteria: { minElevationDeg: 40, maxSpanMin: 150, minOpportunities: 1 }, availability: fullDay(), range: { start: at(-120), end: at(400) }, selectedNoradIds: [norad] },
       { elements: elementsFixture, status },
       [geom({ norad, rise: 56, set: 68, maxEl: 70, above: [60, 64] })], [], [], T0,
     );
@@ -217,7 +217,7 @@ describe('a recent positive report is necessary, not sufficient (sunlight is enf
   it('sunlight restrictions still apply to an eligible satellite (eclipsed AO-91 pass is excluded)', () => {
     const f = only('AO-91_[FM]', [[hAgo(1), 'H', 0]]);
     const plan = computePlan(
-      { observer: { latDeg: 0, lonDeg: 0, heightKm: 0 }, timeZone: 'UTC', criteria: { minElevationDeg: 40, durationMin: 150, minOpportunities: 1 }, availability: fullDay(), range: { start: at(-120), end: at(400) }, selectedNoradIds: [43017] },
+      { observer: { latDeg: 0, lonDeg: 0, heightKm: 0 }, timeZone: 'UTC', criteria: { minElevationDeg: 40, maxSpanMin: 150, minOpportunities: 1 }, availability: fullDay(), range: { start: at(-120), end: at(400) }, selectedNoradIds: [43017] },
       { elements: elementsFixture, status: f },
       [geom({ norad: 43017, rise: 30, set: 42, maxEl: 70, above: [34, 38], sun: [[30, 42, false, 70]] })], [], [], T0,
     );
@@ -270,7 +270,7 @@ describe('unselected / ineligible satellites cannot affect ranking or counts', (
   ];
   const run = (selectedNoradIds: number[], minOpportunities = 2) =>
     computePlan(
-      { observer: { latDeg: 0, lonDeg: 0, heightKm: 0 }, timeZone: 'UTC', criteria: { minElevationDeg: 40, durationMin: 150, minOpportunities }, availability: fullDay(), range: { start: at(-120), end: at(400) }, selectedNoradIds },
+      { observer: { latDeg: 0, lonDeg: 0, heightKm: 0 }, timeZone: 'UTC', criteria: { minElevationDeg: 40, maxSpanMin: 150, minOpportunities }, availability: fullDay(), range: { start: at(-120), end: at(400) }, selectedNoradIds },
       { elements: elementsFixture, status }, passes, [], [], T0,
     );
 
