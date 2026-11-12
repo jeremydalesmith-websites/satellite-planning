@@ -165,8 +165,8 @@ footer ul { padding-left: 20px; }
 .pill.no-recent-reports, .pill.no-data { color: var(--muted); }
 
 /* Strict-eligibility / simplified cards */
-.sat-picker .sat-list { list-style: none; margin: 0 0 .5rem; padding: 0; display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
-.sat-picker .sat-list label { display: inline-flex; align-items: center; gap: .35rem; }
+.sat-picker .sat-list { list-style: none; margin: 0 0 .5rem; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.sat-picker .sat-list label { display: flex; flex-wrap: wrap; align-items: center; gap: .15rem .4rem; }
 .tag { font-size: .8em; border: 1px solid currentColor; border-radius: .6em; padding: 0 .4em; opacity: .8; }
 .badge.restrict { border: 1px solid currentColor; background: transparent; }
 .pass dl.key { display: flex; flex-wrap: wrap; gap: .25rem 1.5rem; margin: .4rem 0; }

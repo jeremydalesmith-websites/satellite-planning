@@ -45,7 +45,6 @@ export function AvailabilityGrid({ value, onChange, invalid, describedBy }: Prop
   return (
     <fieldset className="avail" aria-invalid={invalid || undefined} aria-describedby={describedBy}>
       <legend>Availability</legend>
-      <p className="hint">Set time ranges, then check the days you’re available.</p>
 
       <div className="periods">
         {PERIOD_IDS.map((p) => (
@@ -66,7 +65,6 @@ export function AvailabilityGrid({ value, onChange, invalid, describedBy }: Prop
             </label>
           </div>
         ))}
-        <p className="hint small">These are your availability periods, not sunrise or sunset.</p>
       </div>
 
       <table className="grid">

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { App } from '../src/ui/App.tsx';
 import { emptyAvailability } from '../src/availability/availability.ts';
 import type { StatusFile } from '../src/data/ingest.ts';
 import { computePlan } from '../src/planner.ts';
@@ -9,7 +10,7 @@ import { Results } from '../src/ui/Results.tsx';
 import { T0, at, geom } from './factory.ts';
 import { elementsFixture } from './helpers.ts';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 /** The routine data box is gone from the results: its timestamps live only in the collapsed footer. */
 const status: StatusFile = {
@@ -39,9 +40,11 @@ describe('results lead straight into the event cards', () => {
     expect(container.querySelector('dl.fresh')).toBeNull();
     expect(screen.getByText(/promising event window/)).toBeTruthy();
   });
-  it('keeps the concise provisional-prediction warning on the event card', () => {
-    renderResults(T0);
-    expect(screen.getAllByText(/Provisional plan\./).length).toBe(result.windows.length);
+  it('does not repeat a provisional-planning paragraph on any event card (the one note lives in the footer)', () => {
+    const { container } = renderResults(T0);
+    expect(result.windows.length).toBeGreaterThan(0);
+    expect(container.textContent).not.toMatch(/Provisional plan|Planning estimates only|re-check before the event/i);
+    expect(container.querySelector('.warning')).toBeNull();
   });
   it('does not show a stale-data notice for fresh data', () => {
     renderResults(T0);
@@ -91,5 +94,22 @@ describe('the footer data block', () => {
     );
     expect(container.textContent).toContain('unavailable: no satellite can be confirmed');
     expect(container.textContent).toContain('not yet (run a search)');
+  });
+});
+
+describe('the footer carries the one concise planning note', () => {
+  it('shows it once, in the collapsed footer, alongside the data timing', async () => {
+    const files: Record<string, unknown> = { 'elements.json': elementsFixture, 'status.json': status };
+    vi.stubGlobal('fetch', vi.fn(async (u: URL | string) => {
+      const key = Object.keys(files).find((k) => String(u).endsWith(k));
+      return new Response(key ? JSON.stringify(files[key]) : 'nope', { status: key ? 200 : 404, headers: { 'content-type': 'application/json' } });
+    }));
+    const { container } = render(<App />);
+    await screen.findByText('Data and timing');
+    const footer = container.querySelector('footer details')!;
+    expect(footer.hasAttribute('open')).toBe(false); // collapsed by default
+    const note = 'Planning estimates only. Recheck pass times and repeater status before the event.';
+    expect((footer.textContent ?? '').split(note).length - 1).toBe(1);
+    expect(container.querySelector('main')!.textContent).not.toContain('Planning estimates only');
   });
 });

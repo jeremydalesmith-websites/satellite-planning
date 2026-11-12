@@ -173,7 +173,7 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
       </fieldset>
 
       <fieldset>
-        <legend>What counts as a good pass?</legend>
+        <legend>Pass requirements</legend>
         <div className="row two">
           <label>
             Minimum peak elevation (°)
@@ -186,7 +186,6 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
             <span className="field-err" id="opp-err">{err('minOpportunitiesText')?.message}</span>
           </label>
         </div>
-        <p className="hint small">Higher elevation means a stronger, longer pass. A pass counts only when it reaches this elevation at a time the repeater can be used.</p>
         <div className="seg" role="radiogroup" aria-label="Event duration">
           {EVENT_DURATIONS_MIN.map((m) => (
             <label key={m} className={f.durationMin === m ? 'on' : ''}>

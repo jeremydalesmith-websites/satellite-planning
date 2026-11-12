@@ -59,9 +59,10 @@ describe('availability grid', () => {
     expect(boxes).toHaveLength(21);
     boxes.forEach((b) => expect((b as HTMLInputElement).checked).toBe(false));
     expect(screen.getByRole('checkbox', { name: 'Saturday evening' })).toBeTruthy();
-    // Titled "Availability" with the short intro; the time zone is no longer repeated here (it is in the form's compact line).
+    // Titled "Availability" with no explanatory paragraphs; the time zone is not repeated here (it is in the form's compact line).
     expect(screen.getByText('Availability')).toBeTruthy();
-    expect(screen.getByText('Set time ranges, then check the days you’re available.')).toBeTruthy();
+    expect(screen.queryByText(/Set time ranges/)).toBeNull(); // no intro paragraph
+    expect(screen.queryByText(/not sunrise or sunset/)).toBeNull();
     expect(screen.queryByText('America/New_York')).toBeNull();
   });
   it('reports a toggle through onChange with the right cell', async () => {
@@ -129,6 +130,9 @@ describe('plan form', () => {
     ]) expect(text).not.toContain(gone);
     expect(screen.getByText('Dates')).toBeTruthy();
     expect(screen.getByText('Location')).toBeTruthy();
+    expect(screen.getByText('Pass requirements')).toBeTruthy();
+    expect(screen.queryByText('What counts as a good pass?')).toBeNull();
+    expect(text).not.toContain('Higher elevation means a stronger, longer pass');
     expect(screen.queryByText('Where will the event be?')).toBeNull();
     expect(screen.getByLabelText(/^Latitude/)).toBeTruthy();
     expect(screen.getByLabelText(/^Longitude/)).toBeTruthy();
@@ -205,6 +209,13 @@ describe('satellite selection', () => {
     expect(text).not.toMatch(/Only satellites with a/);
     expect(text).not.toMatch(/searching does not download/i);
     expect(screen.getByText('Satellites to consider')).toBeTruthy();
+  });
+  it('lists the satellites as one vertical list: one row per satellite, no columns', () => {
+    const { container } = render(<PlanForm busy={false} onSearch={() => {}} eligibility={eligNoAo91} />);
+    const items = container.querySelectorAll('.sat-list > li');
+    expect(items.length).toBe(3); // ISS, SO-50 and AO-123 are eligible in this test data
+    items.forEach((li) => expect(li.querySelectorAll('input[type=checkbox]').length).toBe(1)); // checkbox, name and badges share one row (label)
+    expect(container.querySelector('.sat-list')!.tagName).toBe('UL');
   });
   it('a temporarily ineligible satellite stays selected; unchecked satellites are never reselected', async () => {
     const onSearch = vi.fn();

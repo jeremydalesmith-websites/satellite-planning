@@ -1,7 +1,6 @@
 import { overlaps } from '../domain/intervals.ts';
 import type { EventWindow } from '../cluster/cluster.ts';
 import type { Criteria } from '../domain/types.ts';
-import { TIER_TEXT, horizonTier, worstTier } from '../orbit/horizon.ts';
 import type { PredictionMeta } from '../planner.ts';
 import { PassCard } from './PassCard.tsx';
 import { Timeline } from './Timeline.tsx';
@@ -18,10 +17,6 @@ interface Props {
 }
 
 export function EventCard({ event: e, rank, tz, criteria, meta, saved, onSave }: Props) {
-  const tier = worstTier(e.counted.map((c) => horizonTier(c.peakMs, meta.epochs[c.noradId] ?? meta.generatedAtMs)));
-  // One concise warning. Repeater reports are evidence of operation now, not of the event date.
-  const warning = `Provisional plan. ${TIER_TEXT[tier].short} Repeater status reflects recent reports, not the event date.`;
-
   const overlapNames = (id: string) => {
     const a = e.alternatives.find((x) => x.passId === id)!;
     return e.counted.filter((c) => overlaps(c.operating!, a.operating!)).map((c) => c.name);
@@ -52,8 +47,6 @@ export function EventCard({ event: e, rank, tz, criteria, meta, saved, onSave }:
       </p>
 
       <Timeline window={e.window} tz={tz} items={e.counted.map((pass) => ({ pass, kind: 'counted' as const }))} />
-
-      <p className="warning" role="note">{warning}</p>
 
       {e.counted.map((p) => <PassCard key={p.passId} pass={p} role="counted" tz={tz} statusDownloadedAt={meta.statusDownloadedAt} />)}
 

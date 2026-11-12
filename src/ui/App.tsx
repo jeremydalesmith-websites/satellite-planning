@@ -189,7 +189,7 @@ export function App() {
             )}
             <li>Repeater activity comes from volunteer reports on the <a href={SOURCES.amsatStatus.url}>AMSAT status page</a> (reports licensed CC BY 4.0). A satellite is considered only with a “heard” report for its FM repeater in the last 72 hours; a heard beacon does not count.</li>
             <li>Frequencies and operating notes were copied by hand from <a href={SOURCES.amsatFm.url}>AMSAT’s FM satellite page</a>; they are not live and may be out of date.</li>
-            <li>Predictions weeks ahead are estimates, not second-accurate. Re-check close to the event; saved events do this for you when opened.</li>
+            <li>Planning estimates only. Recheck pass times and repeater status before the event.</li>
             <li>Only FM voice repeaters on 2 m / 70 cm are planned. No live tracking, Doppler, SSTV, or linear transponders in this version.</li>
           </ul>
         </details>

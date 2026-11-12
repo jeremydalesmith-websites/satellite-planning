@@ -196,3 +196,46 @@ describe('review fix: tidyStart and window containment (sub-second slack)', () =
     expect(w[0]!.window.end).toBeLessThanOrEqual(start + D + 5000);
   });
 });
+
+/**
+ * CHARACTERIZATION of the interval semantics as they are TODAY. These pin current behaviour so it can be
+ * discussed and deliberately changed; they do not claim the behaviour is the final intent.
+ * One interval per pass drives fit, overlap, ranking time and the timeline bar: the OPERATING interval =
+ * (time at or above the elevation threshold) restricted to the eligible (sunlit, if required) part.
+ */
+describe('current interval semantics (characterization)', () => {
+  it('a pass counts when only its above-threshold segment fits in the event, even though its rise and set are outside', () => {
+    const wide = assessed({ rise: 5, set: 20, maxEl: 60, above: [11, 14] }); // rise 5 is before the event start (10)
+    const late = assessed({ rise: 140, set: 170, maxEl: 60, above: [150, 154] }); // set 170 is after the event end (160)
+    const ev = evaluateWindow(iv(10, 160), [wide, late]);
+    expect(ev.counted).toHaveLength(2);
+    expect(ev.edge).toHaveLength(0);
+  });
+  it('but a pass whose above-threshold segment crosses the event edge is not counted, however much of rise-to-set is inside', () => {
+    const edge = assessed({ rise: 6, set: 20, maxEl: 60, above: [9, 13] }); // above-threshold starts before 10
+    const ev = evaluateWindow(iv(10, 160), [edge]);
+    expect(ev.counted).toHaveLength(0);
+    expect(ev.edge).toHaveLength(1);
+  });
+  it('overlap is decided on the above-threshold segments only: passes whose rise-to-set overlap can both count', () => {
+    const a = assessed({ rise: 20, set: 34, maxEl: 60, above: [24, 28] });
+    const b = assessed({ rise: 30, set: 44, maxEl: 60, above: [31, 35] }); // b rises while a is still up, but the above-threshold times are disjoint
+    expect(a.setMs).toBeGreaterThan(b.riseMs); // the whole passes overlap in time
+    expect(selectNonOverlapping([a, b])).toHaveLength(2); // yet both count
+  });
+  it('and passes whose above-threshold segments overlap cannot both count', () => {
+    const a = assessed({ rise: 20, set: 34, maxEl: 60, above: [24, 30] });
+    const b = assessed({ rise: 22, set: 36, maxEl: 60, above: [28, 33] });
+    expect(selectNonOverlapping([a, b])).toHaveLength(1);
+  });
+  it('for a sunlight-restricted repeater the scheduled interval is the sunlit part of the above-threshold segment, shorter than the time above the threshold', () => {
+    const p = assessed({ norad: AO91, rise: 0, set: 12, maxEl: 70, above: [3, 9], sun: [[0, 5, true, 55], [5, 12, false, 70]] });
+    expect(p.aboveThreshold).toEqual(iv(3, 9)); // 6 min at or above the threshold (what the card headline shows)
+    expect(p.operating).toEqual(iv(3, 5)); // 2 min actually scheduled and counted
+  });
+  it('a pass peaking below the threshold has no interval at all, so it is never selected', () => {
+    const p = assessed({ rise: 0, set: 12, maxEl: 38, above: null });
+    expect(p.operating).toBeNull();
+    expect(evaluateWindow(iv(0, 150), [p]).counted).toHaveLength(0);
+  });
+});
