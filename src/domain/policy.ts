@@ -29,6 +29,12 @@ export const PASS_HORIZON_DEG = 0;
 export const STATUS_WINDOW_HOURS = 72;
 
 /**
+ * Status reports older than this (hours, since they were DOWNLOADED) are called out next to the results: newer reports,
+ * for example a "Not Heard" filed after the download, are not included. Beyond STATUS_WINDOW_HOURS nothing can qualify.
+ */
+export const STATUS_AGE_NOTICE_HOURS = 24;
+
+/**
  * "Known unavailable" requires at least this many negative reports
  * (Not Heard / Telemetry Only) from at least this many distinct callsigns in
  * the window, with no positive report newer than the newest negative.
@@ -37,7 +43,7 @@ export const STATUS_WINDOW_HOURS = 72;
 export const UNAVAILABLE_MIN_REPORTS = 2;
 export const UNAVAILABLE_MIN_CALLSIGNS = 2;
 
-/** Orbital elements older than this (at download time) are not used at all. */
+/** Orbital elements whose epoch is older than this at the time of the SEARCH (not at download time) are not used at all. */
 export const MAX_ELEMENT_AGE_DAYS = 30;
 
 /**

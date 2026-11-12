@@ -2,7 +2,7 @@ import type { Ms } from '../domain/types.ts';
 import { predictAll } from '../orbit/predict.ts';
 import { assessAll, predictionThresholds, statusMap, usableElements } from '../planner.ts';
 import type { LoadedData } from '../planner.ts';
-import { recheckEvent } from './saved.ts';
+import { recheckEvent, savedSatelliteIds } from './saved.ts';
 import type { Recheck, SavedEvent } from './saved.ts';
 
 export type RecheckOutcome =
@@ -15,12 +15,16 @@ export type RecheckOutcome =
  *
  * `nowMs` is the ONE time snapshot for the whole re-check (eligibility and element age).
  * Existing status reports are re-checked against it; no new reports are downloaded here.
- * The saved selection of satellites does not apply: a saved event re-checks the satellites it was saved with.
+ * Only the satellites in the event's saved selection are considered (see savedSatelliteIds), so a satellite the user
+ * did not select can never appear, and the "not included" note is limited to those satellites too.
  */
 export function recheckSavedEvent(saved: SavedEvent, data: LoadedData | null, nowMs: Ms): RecheckOutcome {
   if (!data) return { ok: false, message: 'Current orbital and status data could not be loaded, so eligibility could not be re-confirmed and this event cannot be re-checked right now. Showing what was saved.' };
-  const { usable, skipped } = usableElements(data.elements, nowMs);
-  if (usable.length === 0) return { ok: false, message: 'No usable orbital data is available for a re-check.' };
+  const ids = savedSatelliteIds(saved);
+  const all = usableElements(data.elements, nowMs);
+  const usable = all.usable.filter((s) => ids.has(s.noradId));
+  const skipped = all.skipped.filter((s) => ids.has(s.noradId));
+  if (usable.length === 0) return { ok: false, message: 'No usable orbital data is available for this event’s satellites, so it cannot be re-checked right now.' };
   const margin = 60 * 60_000;
   const run = predictAll(
     usable,

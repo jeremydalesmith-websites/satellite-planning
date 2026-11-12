@@ -163,6 +163,11 @@ export function computePlan(
   generatedAtMs: Ms = nowMs,
 ): PlanResult {
   const { criteria } = inputs;
+  // The search never reaches into the past: the range starts no earlier than the search time (nowMs), however long
+  // ago the form was filled in. A pass that has already begun (AOS before nowMs) cannot be recommended, because a
+  // cluster must lie wholly in the available future; one whose AOS is exactly nowMs still can.
+  const range = { start: Math.max(inputs.range.start, nowMs), end: inputs.range.end };
+  const effective: PlanInputs = { ...inputs, range };
   // ONE time snapshot (nowMs) for the whole search: eligibility, element age and metadata.
   const eligibility = evaluateEligibility(data.status, nowMs);
   const considered = consideredIds(eligibility, inputs.selectedNoradIds);
@@ -170,11 +175,11 @@ export function computePlan(
   // Defence in depth: only eligible AND selected satellites ever reach assessment.
   const planned = passes.filter((p) => considered.has(p.noradId));
   const assessments = assessAll(planned, statuses, criteria.minElevationDeg);
-  const availabilityIntervals = expandAvailability(inputs.availability, inputs.timeZone, inputs.range);
+  const availabilityIntervals = range.end > range.start ? expandAvailability(inputs.availability, inputs.timeZone, range) : [];
   const windows = findEventWindows(assessments, availabilityIntervals, criteria);
   const diagnosis =
     windows.length === 0
-      ? diagnose(inputs, planned, statuses, assessments, availabilityIntervals)
+      ? diagnose(effective, planned, statuses, assessments, availabilityIntervals)
       : null;
   return {
     eligibility,

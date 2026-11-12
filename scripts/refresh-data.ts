@@ -10,8 +10,9 @@
  *
  * Failure policy (never fabricate data):
  *   - elements download/validation fails  -> exit 1, nothing written.
- *   - status download fails               -> warn, status.json NOT written. The app then
- *                                            treats every repeater as "status unknown".
+ *   - status download fails               -> warn, status.json NOT written. Any status.json already on disk
+ *                                            stays in place (and keeps its older download time); with none,
+ *                                            the app treats every repeater as "status unknown".
  *
  * AMSAT status API terms (status.amsat.org/api/v1/overview.php#usage): identify the
  * client with a descriptive User-Agent, poll no more than every 5 minutes. This job

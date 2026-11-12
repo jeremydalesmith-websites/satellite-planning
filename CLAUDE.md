@@ -60,7 +60,11 @@ in frontend code. Use `satellite.js` for orbital mechanics; do not hand-roll it.
   buffers. The whole cluster must fit inside one availability block.
 * One operating station, conservative: passes whose FULL AOS-to-LOS envelopes overlap conflict; overlapping passes
   are shown as alternatives, never as independent opportunities. Operating time never includes eclipsed time.
-* Displayed bounds round outward to the second so a header never appears to exclude part of a counted pass.
+* Displayed clock times round outward to the second so a header never appears to exclude part of a counted pass, but
+  durations are computed from the exact timestamps (display rounding never feeds a scheduling constraint).
+* A search uses the time it runs and never recommends the past: the range starts no earlier than that moment, and a
+  pass that has already begun is not recommended. Saved-event re-checks consider only the saved satellite selection
+  (records without one fall back to the originally counted satellites).
 * Saved events never move; only their evidence is recomputed. New events (`schema: 2`) store the actual cluster
   interval. Older `schema: 1` events are never re-interpreted: leave them untouched in storage; only the user may
   remove them.
@@ -76,7 +80,8 @@ npm test             # vitest; needs no network (uses frozen fixtures)
 npm run build        # typecheck + production build into dist/ (relative base)
 npm run build:satellites   # same, with the intended public base /satellites/
 ```
-Base-path check (needs Playwright): build, `node scripts/serve-subdir.mjs /satellites/ 4173 &`, then
+Base-path check (needs Playwright: a dev dependency installed by `npm ci`, plus the one-time browser download
+`npx playwright install chromium`): build, `node scripts/serve-subdir.mjs /satellites/ 4173 &`, then
 `node scripts/e2e-basepath.mjs http://localhost:4173 /satellites/` (all 18 checks must pass).
 For a working preview with real data: `npm start` (downloads AMSAT data, then
 serves http://localhost:5173/). Behind a proxy prefix with `NODE_USE_ENV_PROXY=1`.

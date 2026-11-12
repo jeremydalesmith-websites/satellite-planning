@@ -43,6 +43,11 @@ export interface SavedEvent {
   location: { latDeg: number; lonDeg: number };
   timeZone: string;
   criteria: Criteria;
+  /**
+   * The satellites the user had selected when the event was saved (NORAD IDs). A re-check considers ONLY these, so an
+   * unselected satellite can never appear. Absent on records saved before this field existed: see savedSatelliteIds.
+   */
+  selectedNoradIds?: number[];
   original: {
     counted: SavedOpportunity[];
     distinctSatellites: number;
@@ -73,6 +78,7 @@ export function snapshotEvent(
   meta: PredictionMeta,
   nowMs: Ms,
   id: string = `ev-${nowMs.toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+  selectedNoradIds?: readonly number[],
 ): SavedEvent {
   return {
     schema: SAVED_SCHEMA,
@@ -82,6 +88,7 @@ export function snapshotEvent(
     location: { ...location },
     timeZone,
     criteria: { ...criteria },
+    ...(selectedNoradIds ? { selectedNoradIds: [...selectedNoradIds] } : {}),
     original: {
       counted: w.counted.map(toSaved),
       distinctSatellites: w.distinctSatellites,
@@ -89,6 +96,15 @@ export function snapshotEvent(
       meta,
     },
   };
+}
+
+/**
+ * The satellites a re-check may consider: the ones selected when the event was saved. Records saved before the selection
+ * was stored have no such list, so they fall back to the satellites that were originally COUNTED (conservative: a
+ * re-check can never bring in a satellite that was not part of the event).
+ */
+export function savedSatelliteIds(saved: SavedEvent): Set<number> {
+  return new Set(saved.selectedNoradIds ?? saved.original.counted.map((c) => c.noradId));
 }
 
 export type ChangeKind = 'lost' | 'added' | 'shifted' | 'elevation' | 'status' | 'eligibility';
@@ -201,7 +217,8 @@ const hasBasics = (e: Partial<SavedEvent> | null): e is Partial<SavedEvent> =>
 /** Validate untrusted JSON from localStorage before use. Only the current (schema 2) format is accepted. */
 export function isSavedEvent(x: unknown): x is SavedEvent {
   const e = x as Partial<SavedEvent> | null;
-  return hasBasics(e) && e.schema === SAVED_SCHEMA && typeof e.criteria!.maxSpanMin === 'number';
+  return hasBasics(e) && e.schema === SAVED_SCHEMA && typeof e.criteria!.maxSpanMin === 'number' &&
+    (e.selectedNoradIds === undefined || (Array.isArray(e.selectedNoradIds) && e.selectedNoradIds.every((n) => Number.isInteger(n))));
 }
 
 /** An event saved under the earlier fixed-window model (schema 1). Recognised only so it can be left alone and counted. */

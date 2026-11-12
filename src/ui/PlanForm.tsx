@@ -78,13 +78,15 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
   }, [f.latText, f.lonText, f.timeZone, f.minElevationText, f.durationMin, f.minOpportunitiesText, f.availability, chosen]);
 
   const set = <K extends keyof FormFields>(k: K, v: FormFields[K]) => setF((p) => ({ ...p, [k]: v }));
-  const { inputs, errors } = useMemo(() => validateForm(f, Date.now()), [f]);
+  const { errors } = useMemo(() => validateForm(f, Date.now()), [f]); // for displaying messages; a search re-validates at click time
   const err = (k: FieldKey): FormErrors | undefined => (submitted ? errors.find((e) => e.field === k) : undefined);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
-    if (inputs) onSearch({ ...inputs, selectedNoradIds: selected });
+    // Validate against the time of THIS click: the memoised result may be hours old if the tab sat idle.
+    const fresh = validateForm(f, Date.now()).inputs;
+    if (fresh) onSearch({ ...fresh, selectedNoradIds: selected });
   };
 
   const locate = () => {

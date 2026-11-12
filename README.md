@@ -35,7 +35,7 @@ station.
 
 Status key: **Done** = implemented and exercised by automated tests; **Done\*** = implemented, with
 the stated limitation or only partial automated coverage; **Not yet** = deliberately not in this phase.
-"Tests" names the files under `tests/`; "browser check" means a manual Playwright run (not part of `npm test`).
+"Tests" names the files under `tests/`; "browser check" means a manual Playwright run (not part of `npm test`; see Testing for the one-time browser install).
 
 | # | Requirement | Status | Evidence | Limitations |
 |---|---|---|---|---|
@@ -55,7 +55,7 @@ the stated limitation or only partial automated coverage; **Not yet** = delibera
 | 9 | Cluster finder: full-pass non-overlapping count, maximum span, availability fit, duplicate removal, ranking, honest empty results | Done | `cluster`, `planner` (vs an independent brute-force reference) | Conservative single-station rule; touching passes count as sequential with no setup gap |
 | 10 | Event cards and pass cards with all required fields | Done* | browser check, screenshots | `EventCard`, `PassCard` and the timeline have no component tests; the timeline is decorative (`aria-hidden`) with the same information in text |
 | 11 | Saved events stay fixed; recomputed; changes and minimum warning | Done* | `saved` | Re-checked when the Saved tab is opened (not on app load); local to one browser. Events saved by an earlier version (fixed-window model) are not re-interpreted: they are left untouched in storage, not shown, and removable on request |
-| 12 | Separate testable modules; required test list; independent validation | Done* | 244 tests; `docs/VALIDATION.md` | Skyfield validation needs Python and is not in `npm test`; it checks the implementation, not real-world accuracy |
+| 12 | Separate testable modules; required test list; independent validation | Done* | the `npm test` suite; `docs/VALIDATION.md` | Skyfield validation needs Python and is not in `npm test`; it checks the implementation, not real-world accuracy |
 | 13 | README (dev, test, deploy, data, catalog, limits, deferred) | Done | this file | |
 
 ## Local development
@@ -92,7 +92,7 @@ Other scripts: `npm run typecheck`, `npm run build`, `npm run preview`,
 npm test
 ```
 
-244 tests, no network needed. They use **clearly labelled fixtures**: real AMSAT
+The test suite (`npm test`) needs no network. It uses **clearly labelled fixtures**: real AMSAT
 elements and status reports frozen on 2026-11-12 in `tests/fixtures/`, plus
 synthetic geometry in `tests/factory.ts` where an exact boundary is needed.
 They cover elevation-threshold boundaries; partial eclipse and local-night vs
@@ -106,7 +106,8 @@ Independent validation against Skyfield is documented in
 [`docs/VALIDATION.md`](docs/VALIDATION.md) (112–223 passes per case agree to
 ≤0.22 s and ≤0.007°; discrepancies explained there).
 
-Two manual browser checks (need Playwright; not part of `npm test`): `scripts/e2e-smoke.mjs` (form, search, save,
+Two manual browser checks (need Playwright, which is a dev dependency installed by `npm ci`, plus a separate one-time
+browser download, `npx playwright install chromium`; not part of `npm test`): `scripts/e2e-smoke.mjs` (form, search, save,
 phone layout, with screenshots) and `scripts/e2e-basepath.mjs` (sub-path behaviour; see Deployment).
 
 ## Deployment and base path
@@ -114,6 +115,14 @@ phone layout, with screenshots) and `scripts/e2e-basepath.mjs` (sub-path behavio
 > **Not published and not enabled.** This repository has **no GitHub Actions workflows**,
 > Pages is not enabled, and no domain or DNS is configured. A refresh-and-deploy workflow is a
 > later phase that needs your approval.
+
+**Deployment prerequisites (recorded, not implemented):** the data files `public/data/*.json` are git-ignored and
+`npm run build` does not fetch them, so a build from a fresh checkout succeeds but deploys a site that shows "Data
+unavailable". A hosted beta therefore needs (1) a scheduled job that runs the refresh and then builds, with the
+data fetched at build time; (2) a build-time check that fails or warns when the data is missing or old, since nothing
+rejects old data today; (3) a rebuild at least daily, because the 72-hour rule means a copy that is not rebuilt shows
+no eligible satellites after about three days; and (4) the `/satellites/` mapping decision below. Verification
+also needs the one-time Playwright browser install above.
 
 **Intended public address:** `https://k1kfx.com/satellites/`. A separate fox-hunting app is
 planned at `/hunt`; nothing in this repository reads, writes or links to it.
@@ -142,7 +151,7 @@ request to `/hunt/` is caught by both), and a build with the wrong root base (`-
 ```bash
 npm run build:satellites
 node scripts/serve-subdir.mjs /satellites/ 4173 &
-node scripts/e2e-basepath.mjs http://localhost:4173 /satellites/    # needs Playwright
+node scripts/e2e-basepath.mjs http://localhost:4173 /satellites/    # needs Playwright + `npx playwright install chromium` (once)
 ```
 
 **Not verified (cannot be, until deployment):** how GitHub Pages will actually map
@@ -211,7 +220,12 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
 * **Availability.** The whole AOS-to-LOS cluster must lie inside one merged availability block (Midday +
   Evening merge into one block). A pass that begins before or ends after the block does not count, even if
   its peak is inside. Period boundaries are local wall-clock times in the selected zone, converted per day with
-  Luxon, so DST is handled. Periods cannot cross midnight.
+  Luxon, so DST is handled. A boundary that falls in the repeated hour of a fall-back day takes the earlier instant,
+  resolved explicitly so the result never depends on the date the page is opened. Periods cannot cross midnight.
+* **Search time.** Every search uses the time it is run (one snapshot), however long ago the form was filled in, and
+  the range starts no earlier than that moment: past passes and clusters can never be recommended. A pass that has
+  already begun (AOS before the search time) is not recommended, because a cluster must lie wholly in the available
+  future; one whose AOS is exactly the search time still can.
 * **Overlap rule (one operating station, no setup gap; conservative).** Two passes conflict if their **full
   AOS-to-LOS envelopes overlap**, even if they overlap only at low elevation. Touching end-to-start is allowed.
   The planner counts the largest set of pairwise non-overlapping passes in a cluster. Ties go to more total
@@ -225,7 +239,9 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
   At most 25 clusters are shown.
 * **Saved events.** A new event stores the actual cluster interval from its header and is re-checked against
   that fixed interval (`schema: 2`). A pass that drifts so its full pass crosses the saved edge is flagged,
-  not followed. Because the saved edges are exact AOS/LOS instants, a pass within 2 seconds of them still counts as
+  not followed. A new event also stores the satellites that were selected when it was saved, and re-checks consider only
+  those, so an unselected satellite can never appear (older records without a stored selection fall back to the
+  satellites that were originally counted, the conservative choice). Because the saved edges are exact AOS/LOS instants, a pass within 2 seconds of them still counts as
   inside (recomputing the same pass moves its edges by tens of milliseconds, which is not drift). Events saved by an earlier version (`schema: 1`, the fixed-window model) are never
   re-interpreted: they are left untouched in storage, not shown or re-checked, and the Saved tab offers an explicit
   "Remove" for them.
@@ -256,6 +272,10 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
   affects results. Your choice is stored exactly as you made it (in this browser): a satellite that is
   temporarily ineligible stays selected and returns by itself when it qualifies again, and one you
   unchecked is never re-selected for you.
+* **Status age.** A compact line beside the results says how old the status reports are ("Status updated 2 hours
+  ago."), judged from when the *status* was downloaded (not the orbital data). It becomes a warning after 24 hours
+  (reports filed since the download are not included) and states plainly after 72 hours that nothing can qualify.
+  Missing status data is called out; the full timestamps stay in the collapsed footer.
 * **Checking vs downloading.** Searching or opening saved events *re-checks the existing reports
   against the current time* (one time snapshot per search or re-check). It does **not** download new
   reports; the page shows when the reports were downloaded (by `npm run refresh-data` / `npm start`) and
@@ -447,6 +467,6 @@ src/
   ui/            React components and styles
 scripts/         refresh-data.ts · smoke.ts · serve-subdir.mjs · e2e-smoke.mjs
 validation/      independent Skyfield comparison
-tests/           244 tests + labelled fixtures
+tests/           test suite + labelled fixtures
 CLAUDE.md          working agreements for contributors
 ```

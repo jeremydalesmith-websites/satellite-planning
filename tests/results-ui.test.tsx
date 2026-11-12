@@ -46,17 +46,18 @@ describe('results lead straight into the event cards', () => {
     expect(container.textContent).not.toMatch(/Provisional plan|Planning estimates only|re-check before the event/i);
     expect(container.querySelector('.warning')).toBeNull();
   });
-  it('does not show a stale-data notice for fresh data', () => {
-    renderResults(T0);
+  it('does not show a stale-data notice for fresh data (only the small status-age hint)', () => {
+    const { container } = renderResults(T0);
+    expect(container.querySelector('.notice.warn')).toBeNull();
     expect(screen.queryByText(/days ago/)).toBeNull();
   });
 });
 
 describe('actionable warnings are preserved', () => {
-  it('warns when the downloaded data is old', () => {
-    renderResults(T0 + 10 * 86_400_000);
-    expect(screen.getByText(/downloaded 10 days ago/)).toBeTruthy();
-    expect(screen.getByText(/reports older than 72 hours cannot qualify a satellite/)).toBeTruthy();
+  it('warns when the STATUS data is old (judged from the status download time, not the orbital download)', () => {
+    renderResults(T0 + 10 * 86_400_000); // status was downloaded at T0
+    expect(screen.getByText(/Status updated 10 days ago/)).toBeTruthy();
+    expect(screen.getByText(/older than 72 hours cannot qualify a satellite/)).toBeTruthy();
   });
   it('shows the status-data-unavailable message', () => {
     renderResults(T0, 'Operating-status data is unavailable (HTTP 500). No satellite can be confirmed eligible without it, so none will be planned.');

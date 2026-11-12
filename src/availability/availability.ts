@@ -11,7 +11,7 @@
  * "noon–5 p.m." meaning noon–5 p.m. across daylight-saving changes (the interval
  * is 4 h or 6 h long on a transition day if the transition falls inside it).
  * Nonexistent wall times (spring-forward gap) snap to the instant the clocks jump (see wallTime);
- * ambiguous ones (fall-back) take the earlier instant (Luxon default).
+ * ambiguous ones (fall-back) take the earlier instant, resolved explicitly so the result never depends on the date the page is opened.
  */
 import { DateTime } from 'luxon';
 import { MAX_SEARCH_DAYS } from '../domain/policy.ts';
@@ -82,19 +82,31 @@ const offsetAt = (ms: number, zone: string) => DateTime.fromMillis(ms, { zone })
  * Nonexistent wall times (inside a spring-forward gap) snap to the instant the clocks jump, i.e.
  * the first valid moment, so "02:30-03:30" on a 02:00->03:00 day is the real half hour 03:00-03:30
  * (Luxon alone would shift 02:30 to 03:30 and lose it). Ambiguous wall times (fall-back repeat)
- * take the earlier instant, Luxon's default.
+ * take the earlier instant, resolved explicitly (Luxon's own choice depends on today's offset).
  */
 function wallTime(day: DateTime, minutes: number, zone: string): DateTime {
   const d = minutes >= 1440 ? day.plus({ days: 1 }) : day;
   const m = minutes >= 1440 ? 0 : minutes;
   const hour = Math.floor(m / 60);
   const minute = m % 60;
-  const dt = DateTime.fromObject({ year: d.year, month: d.month, day: d.day, hour, minute }, { zone });
-  if (dt.hour === hour && dt.minute === minute) return dt; // exists
-  // Nonexistent: find the transition instant by bisection (offset changes once within a day).
-  let lo = dt.toMillis() - 24 * 3_600_000; // old offset
-  let hi = dt.toMillis(); // new offset
+  // The wall time read as if it were UTC. The real instant is that minus the zone's offset, and the offset is only
+  // ambiguous on a transition day, so try the offsets in force a day before and a day after.
+  const asUtc = Date.UTC(d.year, d.month - 1, d.day, hour, minute);
+  const candidates = new Set([asUtc - offsetAt(asUtc - 86_400_000, zone) * 60_000, asUtc - offsetAt(asUtc + 86_400_000, zone) * 60_000]);
+  const valid = [...candidates].filter((ms) => {
+    const x = DateTime.fromMillis(ms, { zone });
+    return x.year === d.year && x.month === d.month && x.day === d.day && x.hour === hour && x.minute === minute;
+  });
+  // Exists once: that instant. Exists twice (fall-back repeat): the EARLIER one, deterministically. This is resolved
+  // here rather than left to Luxon, whose choice for an ambiguous time depends on the zone offset at the time of the
+  // call (so the same inputs would give different availability in July and in December).
+  if (valid.length) return DateTime.fromMillis(Math.min(...valid), { zone });
+  // Nonexistent (inside a spring-forward gap): find the transition instant by bisection (the offset changes once nearby).
+  let lo = asUtc - 36 * 3_600_000;
+  let hi = asUtc + 36 * 3_600_000;
   const after = offsetAt(hi, zone);
+  const before = offsetAt(lo, zone);
+  if (before === after) return DateTime.fromObject({ year: d.year, month: d.month, day: d.day, hour, minute }, { zone }); // no transition: cannot happen
   while (hi - lo > 1) {
     const mid = lo + Math.floor((hi - lo) / 2);
     if (offsetAt(mid, zone) === after) hi = mid;

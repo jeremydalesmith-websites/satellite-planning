@@ -194,7 +194,8 @@ function classifyReports(
 
   if (!file) return unconfirmed('no-data', 'No operating-status data is available, so this repeater cannot be confirmed.');
   const entry = file.satellites[activity.amsatStatusKey];
-  if (!entry || entry.error) return unconfirmed('no-data', 'Status data could not be retrieved for this repeater.');
+  // Fail closed: a missing, errored or malformed entry (no reports list) is "no data", never a crash.
+  if (!entry || entry.error || !Array.isArray(entry.reports)) return unconfirmed('no-data', 'Status data could not be retrieved for this repeater.');
 
   const since = nowMs - windowHours * 3_600_000;
   let positives = 0;

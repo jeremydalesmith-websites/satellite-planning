@@ -1,6 +1,8 @@
 import type { PlanInputs, PlanResult } from '../planner.ts';
 import type { Ms } from '../domain/types.ts';
 import { ACTIVITIES } from '../catalog/catalog.ts';
+import { STATUS_AGE_NOTICE_HOURS, STATUS_WINDOW_HOURS } from '../domain/policy.ts';
+import { fmtAgo } from './format.ts';
 import { EventCard } from './EventCard.tsx';
 
 interface Props {
@@ -12,9 +14,6 @@ interface Props {
   statusProblem: string | null;
 }
 
-/** Days after which the downloaded data gets a visible warning (actionable; routine timestamps stay in the footer). */
-const STALE_DATA_NOTICE_DAYS = 3;
-
 export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem }: Props) {
   const { criteria, timeZone: tz } = inputs;
   const { windows, diagnosis, eligibility } = result;
@@ -22,7 +21,9 @@ export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem 
   const considered = result.consideredNoradIds.map(names);
   const excluded = eligibility.filter((e) => !e.eligible);
   const unselected = eligibility.filter((e) => e.eligible && !result.consideredNoradIds.includes(e.noradId));
-  const staleDays = (nowMs - Date.parse(result.meta.elementsDownloadedAt)) / 86_400_000;
+  // Status freshness is judged from when the STATUS reports were downloaded (not the orbital data).
+  const statusAt = result.meta.statusDownloadedAt ? Date.parse(result.meta.statusDownloadedAt) : null;
+  const statusAgeHours = statusAt === null ? null : Math.max(0, nowMs - statusAt) / 3_600_000;
   const diagCount = excluded.length + result.skipped.length;
 
   return (
@@ -37,11 +38,20 @@ export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem 
         {' '}Satellites considered: <strong>{considered.length ? considered.join(', ') : 'none (no selected satellite currently qualifies)'}</strong>.
       </p>
 
-      {staleDays > STALE_DATA_NOTICE_DAYS && (
+      {statusAt !== null && statusAgeHours !== null && statusAgeHours <= STATUS_AGE_NOTICE_HOURS && (
+        <p className="hint small status-age">Status updated {fmtAgo(statusAt, nowMs)}.</p>
+      )}
+      {statusAt !== null && statusAgeHours !== null && statusAgeHours > STATUS_AGE_NOTICE_HOURS && statusAgeHours <= STATUS_WINDOW_HOURS && (
         <p className="notice warn" role="note">
-          This copy of the data was downloaded {Math.round(staleDays)} days ago. Searching does not download newer data, and reports older than 72 hours cannot qualify a satellite.
+          Status updated {fmtAgo(statusAt, nowMs)}. Reports filed since then are not included, so eligibility may be out of date; this copy of the status data needs refreshing.
         </p>
       )}
+      {statusAt !== null && statusAgeHours !== null && statusAgeHours > STATUS_WINDOW_HOURS && (
+        <p className="notice warn" role="note">
+          Status updated {fmtAgo(statusAt, nowMs)}. Reports older than {STATUS_WINDOW_HOURS} hours cannot qualify a satellite, so few or none can be eligible until the status data is refreshed.
+        </p>
+      )}
+      {statusAt === null && !statusProblem && <p className="hint small status-age">Status data unavailable.</p>}
       {statusProblem && <p className="notice warn" role="note">{statusProblem}</p>}
       {result.predictionErrors.length > 0 && (
         <p className="notice warn" role="note">
@@ -78,7 +88,7 @@ export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem 
 
       {windows.map((w, i) => (
         <EventCard
-          key={w.window.start}
+          key={w.counted.map((c) => c.passId).join('|')} // the counted passes identify a cluster uniquely (exact duplicates are removed); a start time does not
           event={w}
           rank={i + 1}
           tz={tz}

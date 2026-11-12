@@ -63,12 +63,12 @@ describe('event header shows the ACTUAL cluster, never rounded inward', () => {
 });
 
 describe('format helpers never round a bound inward', () => {
-  it('floorSec/ceilSec move outward and fmtSpan uses the outward bounds', () => {
+  it('floorSec/ceilSec move clock times outward, while fmtSpan measures the exact elapsed time', () => {
     for (const ms of [0, 1, 999, 1000, 1001, 123_456, 86_399_999]) {
       expect(floorSec(ms)).toBeLessThanOrEqual(ms);
       expect(ceilSec(ms)).toBeGreaterThanOrEqual(ms);
     }
-    expect(fmtSpan(400, 60_600)).toBe('1 min 01 s'); // 0.4 s .. 60.6 s displays as 0 s .. 61 s
+    expect(fmtSpan(400, 60_600)).toBe('1 min 00 s'); // the duration is EXACT (60.2 s); only the clock times round outward
     expect(fmtSpan(0, 5_400_000 + 27_000)).toBe('1 h 30 min 27 s');
     expect(fmtSpan(0, 45_000)).toBe('45 s');
   });
@@ -80,7 +80,7 @@ describe('pass card: full pass up front, details behind Details, no ambiguous "u
     const card = container.querySelector('article.pass')!;
     const main = card.querySelector('dl.key')!.textContent!;
     for (const label of ['AOS–LOS', 'Peak', 'Max elevation', 'Full pass']) expect(main).toContain(label);
-    expect(main).toContain('12 min 01 s'); // 15:56:00.4 .. 16:08:00.6 displays as 15:56:00 .. 16:08:01
+    expect(main).toContain('12 min 00 s'); // exact 12 min 00.2 s; the clock times beside it show 3:56:00 PM – 4:08:01 PM (outward)
     expect(main).not.toContain('Time above');
     const details = card.querySelector('details.more')!;
     expect(details.textContent).toContain('Time above 40°');

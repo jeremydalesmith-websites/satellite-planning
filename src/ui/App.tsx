@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { consideredIds, evaluateEligibility } from '../eligibility/eligibility.ts';
+import { DEFAULT_SELECTED_NORAD_IDS, consideredIds, evaluateEligibility } from '../eligibility/eligibility.ts';
 import { loadData } from '../data/load.ts';
 import type { LoadResult } from '../data/load.ts';
 import { predictInWorker } from '../orbit/client.ts';
@@ -54,10 +54,16 @@ export function App() {
   const eligibility = useMemo(() => (data ? evaluateEligibility(data.status, nowMs) : null), [data, nowMs]);
 
   const runSearch = useCallback(
-    async (inputs: PlanInputs) => {
+    async (searchInputs: PlanInputs) => {
+      let inputs = searchInputs;
       if (!data) return;
       handle.current?.cancel();
-      const now = Date.now(); // the ONE time snapshot for this whole search
+      const now = Date.now(); // the ONE time snapshot for this whole search (the form may have been filled in long ago)
+      if (inputs.range.end <= now) {
+        setSearch({ state: 'error', message: 'That date range has already passed. Choose dates from today onward.' });
+        return;
+      }
+      inputs = { ...inputs, range: { start: Math.max(inputs.range.start, now), end: inputs.range.end } };
       const { usable, skipped } = usableElements(data.elements, now);
       if (usable.length === 0) {
         setSearch({ state: 'error', message: 'No satellite has orbital data recent enough to predict from. Nothing was calculated.' });
@@ -116,6 +122,8 @@ export function App() {
       inputs.criteria,
       result.meta,
       Date.now(),
+      undefined,
+      inputs.selectedNoradIds ?? DEFAULT_SELECTED_NORAD_IDS,
     );
     persist([...events.filter((e) => !sameEvent(e, w.window.start, w.window.end, inputs)), snap]);
   };

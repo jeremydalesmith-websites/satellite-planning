@@ -37,9 +37,24 @@ export function isElementsFile(x: unknown): x is ElementsFile {
     f.sets.every((s) => typeof s.noradId === 'number' && typeof s.line1 === 'string' && typeof s.line2 === 'string' && Number.isFinite(s.epochMs));
 }
 
-export function isStatusFile(x: unknown): x is StatusFile {
+const REPORT_CODES = new Set(['H', 'N', 'T', 'C']);
+
+/** What is wrong with a status file, or null if it is well formed. Every entry must carry a valid reports list. */
+export function statusFileProblem(x: unknown): string | null {
   const f = x as Partial<StatusFile> | null;
-  return !!f && f.schema === 1 && typeof f.downloadedAt === 'string' && !!f.satellites && typeof f.satellites === 'object';
+  if (!f || f.schema !== 1 || typeof f.downloadedAt !== 'string' || !f.satellites || typeof f.satellites !== 'object') return 'unexpected format';
+  for (const [key, entry] of Object.entries(f.satellites)) {
+    const e = entry as { reports?: unknown } | null;
+    if (!e || typeof e !== 'object') return `the entry for ${key} is missing`;
+    if (!Array.isArray(e.reports)) return `the entry for ${key} has no valid list of reports`;
+    const bad = e.reports.some((r) => !Array.isArray(r) || r.length !== 3 || typeof r[0] !== 'number' || !Number.isFinite(r[0]) || !REPORT_CODES.has(r[1]) || typeof r[2] !== 'number');
+    if (bad) return `the entry for ${key} contains a malformed report`;
+  }
+  return null;
+}
+
+export function isStatusFile(x: unknown): x is StatusFile {
+  return statusFileProblem(x) === null;
 }
 
 export async function loadData(): Promise<LoadResult> {
@@ -58,8 +73,9 @@ export async function loadData(): Promise<LoadResult> {
   let statusProblem: string | null = null;
   try {
     const raw = await getJson('data/status.json');
-    if (!isStatusFile(raw)) throw new Error('unexpected format');
-    status = raw;
+    const problem = statusFileProblem(raw);
+    if (problem) throw new Error(`the file is malformed: ${problem}`);
+    status = raw as StatusFile; // validated just above
   } catch (e) {
     statusProblem = `Operating-status data is unavailable (${e instanceof Error ? e.message : String(e)}). No satellite can be confirmed eligible without it, so none will be planned.`;
   }

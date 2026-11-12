@@ -38,18 +38,32 @@ export function ago(ms: Ms, nowMs: Ms): string {
 }
 
 /**
- * Displayed bounds are rounded OUTWARD to whole seconds (start down, end up) so a header or card can never appear to
- * exclude part of a pass. Durations shown next to them are computed from these same displayed bounds.
+ * Displayed CLOCK TIMES are rounded OUTWARD to whole seconds (start down, end up) so a header or card can never appear to
+ * exclude part of a pass. That is a display matter only: durations are computed from the EXACT timestamps (below), so a
+ * cluster that satisfies the maximum span can never be displayed as longer than it, and scheduling constraints always use
+ * exact times.
  */
 export const floorSec = (ms: Ms): Ms => Math.floor(ms / 1000) * 1000;
 export const ceilSec = (ms: Ms): Ms => Math.ceil(ms / 1000) * 1000;
 export const fmtStartSec = (ms: Ms, tz: string) => fmtTimeSec(floorSec(ms), tz);
 export const fmtEndSec = (ms: Ms, tz: string) => fmtTimeSec(ceilSec(ms), tz);
-/** Elapsed time between two instants, as displayed (outward-rounded), e.g. "1 h 30 min 27 s", "10 min 49 s", "45 s". */
+/** Exact elapsed time between two instants, rounded to the nearest second, e.g. "1 h 30 min 27 s", "10 min 49 s", "45 s". */
 export function fmtSpan(startMs: Ms, endMs: Ms): string {
-  const total = Math.round((ceilSec(endMs) - floorSec(startMs)) / 1000);
+  const total = Math.round((endMs - startMs) / 1000);
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-  return [h ? `${h} h` : '', h || m ? `${m} min` : '', `${h || m ? String(s).padStart(2, '0') : s} s`].filter(Boolean).join(' ');
+  return [h ? `${h} h` : '', h || m ? `${h ? String(m).padStart(2, '0') : m} min` : '', `${h || m ? String(s).padStart(2, '0') : s} s`].filter(Boolean).join(' ');
+}
+
+/** "just now", "5 minutes ago", "2 hours ago", "3 days ago". */
+export function fmtAgo(ms: Ms, nowMs: Ms): string {
+  const d = Math.max(0, nowMs - ms);
+  const min = Math.floor(d / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} minute${min === 1 ? '' : 's'} ago`;
+  const h = Math.floor(min / 60);
+  if (h < 48) return `${h} hour${h === 1 ? '' : 's'} ago`;
+  const days = Math.floor(h / 24);
+  return `${days} days ago`;
 }
