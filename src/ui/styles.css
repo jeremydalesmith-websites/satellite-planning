@@ -201,6 +201,6 @@ footer .fresh { margin-top: 6px; }
 .sw.shadow { background: repeating-linear-gradient(135deg, var(--alt) 0, var(--alt) 3px, transparent 3px, transparent 6px); border: 1px solid var(--alt); height: 8px; }
 .seg-label { display: block; font-weight: 600; margin-top: 12px; }
 
-/* Check all / Uncheck all below the availability grid, left-aligned: compact, white, subtle border (the default button look) */
-.grid-actions { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; margin: 12px 0 0; }
+/* Check all / Uncheck all below the availability grid, centered as a pair: compact, white, subtle border (the default button look) */
+.grid-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 12px 0 0; }
 .grid-actions button { min-height: 34px; padding: 4px 14px; font-size: .9rem; }

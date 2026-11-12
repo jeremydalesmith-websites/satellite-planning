@@ -89,6 +89,7 @@ describe('availability grid', () => {
       expect(lastRow.textContent).toContain('Evening');
       expect(lastRow.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(check.compareDocumentPosition(uncheck) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // side by side, Check all first
+      expect(actions.className).toBe('grid-actions'); // centering is done by the stylesheet (see .grid-actions), not by extra markup
     });
     it('Check all checks exactly the 21 day x period boxes and leaves the time ranges alone', async () => {
       const onChange = vi.fn();
