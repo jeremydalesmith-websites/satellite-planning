@@ -1,0 +1,68 @@
+/**
+ * Application POLICY constants.
+ *
+ * These are choices made by this planner, NOT authoritative guarantees from
+ * AMSAT, satellite owners, or the orbital model. They are documented in the
+ * README ("Policies") and surfaced in the UI wherever they change a result.
+ */
+
+/** Search limits (requirements: default 28 days, at most 42). */
+export const DEFAULT_SEARCH_DAYS = 28;
+export const MAX_SEARCH_DAYS = 42;
+
+/** Elevation input bounds. Below ~5° a pass is rarely usable in practice. */
+export const MIN_ELEVATION_INPUT_DEG = 5;
+export const MAX_ELEVATION_INPUT_DEG = 85;
+export const DEFAULT_MIN_ELEVATION_DEG = 40;
+
+/** Event durations offered (minutes). */
+export const EVENT_DURATIONS_MIN = [120, 150, 180] as const;
+export const DEFAULT_MIN_OPPORTUNITIES = 3;
+
+/** A pass is defined from geometric rise to set at this elevation above a flat horizon. */
+export const PASS_HORIZON_DEG = 0;
+
+/**
+ * Operational-status freshness window. Only reports observed within this many
+ * hours can establish "recently reported active". Older reports are stale.
+ */
+export const STATUS_WINDOW_HOURS = 72;
+
+/**
+ * "Known unavailable" requires at least this many negative reports
+ * (Not Heard / Telemetry Only) from at least this many distinct callsigns in
+ * the window, with no positive report newer than the newest negative.
+ * One negative report is only "unconfirmed".
+ */
+export const UNAVAILABLE_MIN_REPORTS = 2;
+export const UNAVAILABLE_MIN_CALLSIGNS = 2;
+
+/** Orbital elements older than this (at download time) are not used at all. */
+export const MAX_ELEMENT_AGE_DAYS = 30;
+
+/**
+ * Prediction-horizon labels, measured from the orbital-elements epoch to the
+ * time being predicted. These are wording tiers, NOT accuracy figures.
+ */
+export const TENTATIVE_AFTER_DAYS = 7;
+export const PROVISIONAL_AFTER_DAYS = 28;
+
+/**
+ * Sunlight: the satellite counts as sunlit only when none of the Sun's disc is
+ * covered by Earth (shadow fraction below this). Penumbra therefore counts as
+ * NOT sunlit for sunlight-dependent repeaters (conservative; lasts seconds).
+ */
+export const SUNLIT_SHADOW_FRACTION_BELOW = 0.01;
+
+/** Window consolidation: windows overlapping a better one by this fraction are merged into it. */
+export const WINDOW_SIMILARITY_OVERLAP = 0.5;
+export const RESULT_LIMIT = 25;
+
+/** Preferred event start alignment (minutes) when there is slack. */
+export const START_ALIGNMENT_MIN = 15;
+
+/** Changes smaller than these are not reported as "meaningful" for saved events. */
+export const SAVED_SHIFT_REPORT_SEC = 60;
+export const SAVED_ELEVATION_REPORT_DEG = 2;
+/** Max difference between peak times for an old and new pass to be "the same pass". */
+export const SAVED_MATCH_TOLERANCE_MIN = 10;
