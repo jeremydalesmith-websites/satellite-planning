@@ -164,7 +164,8 @@ export function tidyStart(lo: Ms, hi: Ms, alignMin = START_ALIGNMENT_MIN): Ms {
   const g = Math.round(centre / step) * step;
   const candidates = [g, g - step, g + step].filter((c) => c >= lo && c <= hi);
   if (candidates.length) return candidates.reduce((x, y) => (Math.abs(x - centre) <= Math.abs(y - centre) ? x : y));
-  return Math.round(centre / 1000) * 1000;
+  // No aligned time fits: use the centre, rounded to a second but never outside [lo, hi].
+  return Math.min(hi, Math.max(lo, Math.round(centre / 1000) * 1000));
 }
 
 export interface FindOptions {
@@ -215,8 +216,10 @@ export function findEventWindows(
     const hi = Math.min(block.end - D, minStart);
     const s = lo <= hi ? tidyStart(lo, hi) : ev.window.start;
     const re = evaluateWindow({ start: s, end: s + D }, all);
-    // Re-evaluation can only gain passes (window still contains the set); keep the better view.
-    canon.push(re.counted.length >= ev.counted.length ? re : ev);
+    // Keep the tidy window only if it is still entirely inside the availability block and
+    // still counts at least as many passes; otherwise keep the (valid) searched window.
+    const inBlock = re.window.start >= block.start && re.window.end <= block.end;
+    canon.push(inBlock && re.counted.length >= ev.counted.length ? re : ev);
   }
 
   // Rank, then fold windows that substantially overlap a better one into it.

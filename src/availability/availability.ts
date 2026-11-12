@@ -10,8 +10,8 @@
  * zone, converted to absolute instants with Luxon per calendar day. That keeps
  * "noon–5 p.m." meaning noon–5 p.m. across daylight-saving changes (the interval
  * is 4 h or 6 h long on a transition day if the transition falls inside it).
- * Nonexistent wall times (spring-forward gap) move forward to the first valid
- * instant; ambiguous ones (fall-back) take the earlier instant (Luxon default).
+ * Nonexistent wall times (spring-forward gap) snap to the instant the clocks jump (see wallTime);
+ * ambiguous ones (fall-back) take the earlier instant (Luxon default).
  */
 import { DateTime } from 'luxon';
 import { MAX_SEARCH_DAYS } from '../domain/policy.ts';
@@ -71,12 +71,36 @@ export function isValidTimeZone(tz: string): boolean {
   return DateTime.now().setZone(tz).isValid;
 }
 
+/** UTC offset (minutes) of a zone at an instant. */
+const offsetAt = (ms: number, zone: string) => DateTime.fromMillis(ms, { zone }).offset;
+
+/**
+ * Local wall-clock time -> absolute instant, for `minutes` after local midnight of `day`
+ * (1440 means the NEXT day's midnight, resolved exactly like that day's own 0:00 so that
+ * consecutive days tile with no false gap, even in zones whose clocks change at midnight).
+ *
+ * Nonexistent wall times (inside a spring-forward gap) snap to the instant the clocks jump, i.e.
+ * the first valid moment, so "02:30-03:30" on a 02:00->03:00 day is the real half hour 03:00-03:30
+ * (Luxon alone would shift 02:30 to 03:30 and lose it). Ambiguous wall times (fall-back repeat)
+ * take the earlier instant, Luxon's default.
+ */
 function wallTime(day: DateTime, minutes: number, zone: string): DateTime {
-  if (minutes >= 1440) return day.plus({ days: 1 }).startOf('day');
-  return DateTime.fromObject(
-    { year: day.year, month: day.month, day: day.day, hour: Math.floor(minutes / 60), minute: minutes % 60 },
-    { zone },
-  );
+  const d = minutes >= 1440 ? day.plus({ days: 1 }) : day;
+  const m = minutes >= 1440 ? 0 : minutes;
+  const hour = Math.floor(m / 60);
+  const minute = m % 60;
+  const dt = DateTime.fromObject({ year: d.year, month: d.month, day: d.day, hour, minute }, { zone });
+  if (dt.hour === hour && dt.minute === minute) return dt; // exists
+  // Nonexistent: find the transition instant by bisection (offset changes once within a day).
+  let lo = dt.toMillis() - 24 * 3_600_000; // old offset
+  let hi = dt.toMillis(); // new offset
+  const after = offsetAt(hi, zone);
+  while (hi - lo > 1) {
+    const mid = lo + Math.floor((hi - lo) / 2);
+    if (offsetAt(mid, zone) === after) hi = mid;
+    else lo = mid;
+  }
+  return DateTime.fromMillis(hi, { zone });
 }
 
 /**

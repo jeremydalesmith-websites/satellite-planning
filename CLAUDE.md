@@ -52,7 +52,7 @@ npm run build        # typecheck + production build into dist/ (relative base)
 npm run build:satellites   # same, with the intended public base /satellites/
 ```
 Base-path check (needs Playwright): build, `node scripts/serve-subdir.mjs /satellites/ 4173 &`, then
-`node scripts/e2e-basepath.mjs http://localhost:4173 /satellites/` (all 17 checks must pass).
+`node scripts/e2e-basepath.mjs http://localhost:4173 /satellites/` (all 18 checks must pass).
 For a working preview with real data: `npm start` (downloads AMSAT data, then
 serves http://localhost:5173/). Behind a proxy prefix with `NODE_USE_ENV_PROXY=1`.
 Independent prediction validation: see `docs/VALIDATION.md` (needs Python).

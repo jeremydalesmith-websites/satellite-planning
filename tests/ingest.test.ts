@@ -43,13 +43,14 @@ describe('TLE ingestion', () => {
 
 describe('status API ingestion', () => {
   it('compacts reports, anonymises callsigns and sorts newest first', () => {
+    const e = { name: 'SO-50_[FM]', noradId: 27607 };
     const { reports, problems } = parseStatusReports({
       data: [
-        { observation_time: '2026-11-12T10:00:00Z', report: 'Heard', callsign: 'aa1aa' },
-        { observation_time: '2026-11-12T12:00:00Z', report: 'Not Heard', callsign: 'AA1AA' },
-        { observation_time: '2026-11-12T11:00:00Z', report: 'Telemetry Only', callsign: 'BB2BB' },
+        { name: e.name, norad_cat_id: e.noradId, observation_time: '2026-11-12T10:00:00Z', report: 'Heard', callsign: 'aa1aa' },
+        { name: e.name, norad_cat_id: e.noradId, observation_time: '2026-11-12T12:00:00Z', report: 'Not Heard', callsign: 'AA1AA' },
+        { name: e.name, norad_cat_id: e.noradId, observation_time: '2026-11-12T11:00:00Z', report: 'Telemetry Only', callsign: 'BB2BB' },
       ],
-    });
+    }, e);
     expect(problems).toEqual([]);
     expect(reports.map((r) => r[1])).toEqual(['N', 'T', 'H']);
     expect(reports[0]![2]).toBe(reports[2]![2]); // same operator, case-insensitive
@@ -57,11 +58,12 @@ describe('status API ingestion', () => {
     expect(JSON.stringify(reports)).not.toMatch(/AA1AA/i); // no callsigns stored
   });
   it('rejects unknown report values and malformed bodies rather than guessing', () => {
-    const r = parseStatusReports({ data: [{ observation_time: '2026-11-12T10:00:00Z', report: 'Maybe', callsign: 'X' }, { report: 'Heard' }] });
+    const e = { name: 'SO-50_[FM]', noradId: 27607 };
+    const r = parseStatusReports({ data: [{ name: e.name, observation_time: '2026-11-12T10:00:00Z', report: 'Maybe', callsign: 'X' }, { name: e.name, report: 'Heard' }] }, e);
     expect(r.reports).toEqual([]);
     expect(r.problems).toHaveLength(2);
-    expect(parseStatusReports({ error: 'x' }).problems[0]).toMatch(/no "data"/);
-    expect(parseStatusReports(null).reports).toEqual([]);
+    expect(parseStatusReports({ error: 'x' }, e).problems[0]).toMatch(/no "data"/);
+    expect(parseStatusReports(null, e).reports).toEqual([]);
   });
   it('the frozen real status fixture has the expected shape', () => {
     expect(statusFixture.schema).toBe(1);

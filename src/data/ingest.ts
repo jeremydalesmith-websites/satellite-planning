@@ -154,7 +154,7 @@ export interface ExpectedStatusEntry {
  * ID contradicts the catalog), so another mode's reports can never reach the FM
  * classifier even if the API's filtering changed.
  */
-export function parseStatusReports(body: unknown, expected?: ExpectedStatusEntry): StatusParseResult {
+export function parseStatusReports(body: unknown, expected: ExpectedStatusEntry): StatusParseResult {
   const problems: string[] = [];
   const reports: CompactReport[] = [];
   const data = (body as { data?: unknown } | null)?.data;
@@ -164,12 +164,10 @@ export function parseStatusReports(body: unknown, expected?: ExpectedStatusEntry
   const callers = new Map<string, number>();
   for (const row of data) {
     const r = row as { observation_time?: unknown; report?: unknown; callsign?: unknown; name?: unknown; norad_cat_id?: unknown };
-    if (expected) {
-      const idOk = r.norad_cat_id === null || r.norad_cat_id === undefined || r.norad_cat_id === expected.noradId;
-      if (r.name !== expected.name || !idOk) {
-        problems.push(`Rejected report for a different entry: ${JSON.stringify(r.name)} (NORAD ${JSON.stringify(r.norad_cat_id)}), expected ${expected.name}`);
-        continue;
-      }
+    const idOk = r.norad_cat_id === null || r.norad_cat_id === undefined || r.norad_cat_id === expected.noradId;
+    if (r.name !== expected.name || !idOk) {
+      problems.push(`Rejected report for a different entry: ${JSON.stringify(r.name)} (NORAD ${JSON.stringify(r.norad_cat_id)}), expected ${expected.name}`);
+      continue;
     }
     const code = typeof r.report === 'string' ? CODE_BY_LABEL[r.report] : undefined;
     const t = typeof r.observation_time === 'string' ? Date.parse(r.observation_time) : NaN;

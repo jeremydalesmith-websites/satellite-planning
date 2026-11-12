@@ -173,3 +173,22 @@ describe('empty results explain themselves and never relax silently', () => {
     expect(d.suggestions.map((s) => s.kind)).toContain('more-availability');
   });
 });
+
+describe('review fix: tidyStart and window containment (sub-second slack)', () => {
+  it('tidyStart never returns a time outside [lo, hi]', () => {
+    for (const [lo, hi] of [[1000000300, 1000000400], [5, 7], [1000000999, 1000000999]] as const) {
+      const s = tidyStart(lo, hi);
+      expect(s).toBeGreaterThanOrEqual(lo);
+      expect(s).toBeLessThanOrEqual(hi);
+    }
+  });
+  it('a window never starts before its availability block, even when the block starts mid-second', () => {
+    const start = at(7) + 100; // e.g. a range clipped to "now", which has milliseconds
+    const D = 120 * MIN;
+    const trio = [P(10, 14), P(40, 44), P(70, 74)];
+    const w = findEventWindows(trio, [{ start, end: start + D + 5000 }], { durationMin: 120, minOpportunities: 3 });
+    expect(w).toHaveLength(1);
+    expect(w[0]!.window.start).toBeGreaterThanOrEqual(start);
+    expect(w[0]!.window.end).toBeLessThanOrEqual(start + D + 5000);
+  });
+});

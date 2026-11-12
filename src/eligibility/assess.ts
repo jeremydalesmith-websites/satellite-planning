@@ -105,15 +105,13 @@ export function assessPass(
   } else if (status.state === 'known-unavailable') {
     exclusion = 'unavailable';
     verdict = 'excluded';
-    reasons.push(`${status.label}: ${status.explanation}`);
+    reasons.push(`Not usable: ${status.label.toLowerCase()} by recent reports.`);
   } else if (status.state === 'recently-reported-active') {
     verdict = 'eligible';
     reasons.push('Counts toward the event minimum.');
   } else {
     verdict = 'conditional';
-    reasons.push(
-      `Not counted: ${status.label.toLowerCase()}. ${status.explanation}`,
-    );
+    reasons.push(`Not counted: this repeater\u2019s operation is unconfirmed (${status.label.toLowerCase()}).`);
   }
 
   if (restricted && operating && sunlight === 'partly-eclipsed') {

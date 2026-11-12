@@ -16,17 +16,29 @@ const port = Number(process.argv[3] ?? 4173);
 const root = join(fileURLToPath(new URL('..', import.meta.url)), 'dist');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.map': 'application/json' };
 
+// Server-side record of every request that was NOT for this app's prefix. A test can read it from
+// /__outside-hits (itself not counted) to prove, independently of the browser, that the app
+// never reached outside its sub-path.
+const outsideHits = [];
+
 createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://x');
+  if (url.pathname === '/__outside-hits') {
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(outsideHits));
+    return;
+  }
   if (url.pathname === prefix.slice(0, -1)) {
     res.writeHead(301, { location: prefix + url.search }).end();
     return;
   }
   if (!url.pathname.startsWith(prefix)) {
+    outsideHits.push(url.pathname);
     res.writeHead(200, { 'content-type': 'text/html' }).end(`<!doctype html><title>OTHER APP</title><h1 id="other-app">Other site content at ${url.pathname}</h1>`);
     return;
   }
-  let rel = normalize(decodeURIComponent(url.pathname.slice(prefix.length))).replace(/^(\.\.[/\\])+/, '');
+  let decoded;
+  try { decoded = decodeURIComponent(url.pathname.slice(prefix.length)); } catch { res.writeHead(400).end('bad request'); return; }
+  let rel = normalize(decoded).replace(/^(\.\.[/\\])+/, '');
   if (rel === '.' || rel === '' || rel.endsWith('/')) rel = join(rel === '.' ? '' : rel, 'index.html');
   try {
     const p = join(root, rel);

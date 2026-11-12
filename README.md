@@ -41,21 +41,21 @@ the stated limitation or only partial automated coverage; **Not yet** = delibera
 |---|---|---|---|---|
 | 1 | Find clusters of usable FM passes inside my availability; search up to 42 days, marked provisional | Done | `cluster`, `availability`, `planner` | "Tentative/provisional" are wording tiers (>7 / >28 days past the elements epoch), not accuracy figures |
 | 2a | TypeScript, Vite, React, `satellite.js`, phone + desktop | Done | build, typecheck, browser check | Phone layout verified in a 390 px Chromium window only, not on real devices |
-| 2b | Static, GitHub Pages-compatible, configurable sub-directory | Done | `scripts/e2e-basepath.mjs`: 17/17 checks under `/satellites/` (relative and absolute base) and `/tools/sat/` | Not published; the mapping of `/satellites/` to this repository is a deployment-phase decision (see below) |
+| 2b | Static, GitHub Pages-compatible, configurable sub-directory | Done | `scripts/e2e-basepath.mjs`: 18/18 checks under `/satellites/` (relative and absolute base) and `/tools/sat/` | Not published; the mapping of `/satellites/` to this repository is a deployment-phase decision (see below) |
 | 2c | Local storage for preferences and saved events | Done | `ui` tests, browser reload check | Per-browser only; cleared if the user clears site data |
 | 2d | Scheduled GitHub Actions data refresh | **Not yet** | `scripts/refresh-data.ts` works by hand | No workflow in this phase (Phase 3, needs approval) |
 | 2e | No Firebase/DB/auth/paid API/LLM; no secrets in frontend | Done | code review | The refresh script sends a generic User-Agent |
 | 3 | FM repeaters only, 2 m/70 cm cross-band, V/U and U/V; extensible internal model | Done | `planner` (catalog) | `ActivityKind` has one value today; SSTV etc. deliberately not built |
 | 4 | Inputs: location (manual + optional button), timezone, date range, min elevation, duration, min opportunities, validation | Done* | `ui` (validation, defaults, geolocation never called unprompted), `availability` | Real browser geolocation not tested; minimum opportunities accepts 2 to 10 (not 1); elevation limited to 5 to 85 degrees |
-| 5 | Weekly Sun-Sat x Morning/Midday/Evening grid; editable boundaries; merge adjacent; whole event must fit; explicit selection; accessible | Done* | `availability`, `ui` | Periods cannot cross midnight; touch usability not tested on real phones |
-| 6 | Local SGP4 predictions with refined rise/peak/set/threshold/eclipse; three timestamps; Worker | Done | `predict` (vs 1 s brute force), `docs/VALIDATION.md` (vs Skyfield) | No confidence intervals (intended); observer height fixed at 0; no terrain mask |
+| 5 | Weekly Sun-Sat x Morning/Midday/Evening grid; editable boundaries; merge adjacent; whole event must fit; explicit selection; accessible | Done* | `availability`, `ui` | Periods cannot cross midnight; touch usability not tested on real phones; a period boundary inside a spring-forward gap snaps to the moment the clocks jump |
+| 6 | Local SGP4 predictions with refined rise/peak/set/threshold/eclipse; three timestamps; Worker | Done | `predict` (vs 1 s brute force), `docs/VALIDATION.md` (vs Skyfield) | No confidence intervals (intended); observer height fixed at 0; no terrain mask; eclipse boundaries are sampled every 5 s, so a shadow shorter than 5 s inside one pass could be missed (none found in 5,028 real passes) |
 | 7a | Curated catalog in three separate layers with sources | Done* | `planner` (catalog) | Frequencies/restrictions are hand-copied from one AMSAT page dated 2026-10-31. "Status timestamp/explanation" is held per restriction (`asOf`, text) plus a catalog-wide review date, not as per-satellite fields |
 | 7b | AMSAT activity ingestion; FM-mode matching; four operating states; strict counting | Done | `ingest`, `eligibility` | Reports are volunteer observations; whether an operator filed under the right mode cannot be verified |
 | 8 | Sunlight at the satellite, partial eclipse, eligible-portion elevation, explained exclusions | Done* | `eligibility`, `planner` (ISS real-orbit tests), Skyfield comparison | Only AO-91 is flagged sunlight-dependent (only it has a cited source); any penumbra counts as not sunlit |
 | 9 | Cluster finder: non-overlapping count, fit-inside rule, consolidation, ranking, honest empty results | Done | `cluster`, `planner` (vs minute-by-minute reference) | Conservative single-station rule; touching passes count as sequential with no setup gap |
 | 10 | Event cards and pass cards with all required fields | Done* | browser check, screenshots | `EventCard`, `PassCard` and the timeline have no component tests; the timeline is decorative (`aria-hidden`) with the same information in text |
 | 11 | Saved events stay fixed; recomputed; changes and minimum warning | Done* | `saved` | Re-checked when the Saved tab is opened (not on app load); local to one browser |
-| 12 | Separate testable modules; required test list; independent validation | Done* | 146 tests; `docs/VALIDATION.md` | Skyfield validation needs Python and is not in `npm test`; it checks the implementation, not real-world accuracy |
+| 12 | Separate testable modules; required test list; independent validation | Done* | 152 tests; `docs/VALIDATION.md` | Skyfield validation needs Python and is not in `npm test`; it checks the implementation, not real-world accuracy |
 | 13 | README (dev, test, deploy, data, catalog, limits, deferred) | Done | this file | |
 
 ## Local development
@@ -92,7 +92,7 @@ Other scripts: `npm run typecheck`, `npm run build`, `npm run preview`,
 npm test
 ```
 
-146 tests, no network needed. They use **clearly labelled fixtures**: real AMSAT
+152 tests, no network needed. They use **clearly labelled fixtures**: real AMSAT
 elements and status reports frozen on 2026-11-12 in `tests/fixtures/`, plus
 synthetic geometry in `tests/factory.ts` where an exact boundary is needed.
 They cover elevation-threshold boundaries; partial eclipse and local-night vs
@@ -127,14 +127,17 @@ VITE_BASE_PATH=/other/ npm run build   # any other absolute base (macOS/Linux; o
 npm run build                     # default: relative URLs, works from any sub-directory
 ```
 
-**Verified** (`scripts/e2e-basepath.mjs`, Chromium; 17 checks each, all passing) for the relative
+**Verified** (`scripts/e2e-basepath.mjs`, Chromium; 18 checks each, all passing) for the relative
 build and the `/satellites/` build served under `/satellites/`, and the relative build under
 `/tools/sat/`: the page renders; all assets, the Web Worker and both data files load from under
 the prefix; a search runs and shows results; switching tabs works; reloading keeps working
 (preferences and saved events persist); `/satellites/index.html` works; `/satellites` without the
 slash redirects to `/satellites/` (the test server emulates the redirect GitHub Pages performs);
-**no request ever leaves the prefix** (nothing is read from `/` or `/hunt`); no HTTP, console or
-page errors; and a stand-in `/hunt/` page is still served by the "other app", unchanged. Reproduce:
+**no request ever leaves the prefix**, checked two independent ways (a permanent browser-side log of every
+request, and the test server's own record of out-of-prefix hits), so nothing is read from `/` or `/hunt`;
+and no HTTP, console or page errors. A **negative control** proves the leak detectors can fail (a deliberate
+request to `/hunt/` is caught by both), and a build with the wrong root base (`--base=/`) served under
+`/satellites/` makes the script fail. Reproduce:
 
 ```bash
 npm run build:satellites
@@ -309,6 +312,39 @@ tones, AMSAT status key) and `RESTRICTIONS` (sunlight-only / schedule-dependent
 The refresh script and the app pick it up automatically. Re-check AMSAT's FM page
 periodically; the catalog does not update itself.
 
+## Independent review (what it found and what was done)
+
+A separate reviewer agent, given only the requirements and the code, read the cluster finder,
+sunlight eligibility, time-zone handling and base-path code and probed them with randomized
+checks. **A review by an AI, even a clean one, is not proof of correctness**; it found real defects
+the original tests had missed, which is the point of asking.
+
+Fixed (each first reproduced by a failing test):
+* **Window could start up to a second before its availability block** (a rounding fallback in
+  `tidyStart` could leave `[lo, hi]`; the tidy window was never re-checked against the block).
+  Clamped, and a tidy window is now accepted only if it stays inside the block.
+* **False one-hour gap in zones whose clocks change at midnight** (e.g. America/Havana): the end of
+  one day and the start of the next were resolved differently. Both now use the same conversion.
+* **A period inside a spring-forward gap lost real time** (02:30-03:30 became empty). Nonexistent
+  times now snap to the instant the clocks jump (03:00-03:30). The code comment had also claimed this.
+* **Base-path check was weaker than it read** (it discarded requests, used "some" for assets, and its
+  `/hunt` check could not fail). Rewritten: permanent request log, every asset checked, server-side
+  out-of-prefix log, and a negative control (see Deployment).
+* **FM-entry guard was optional** in `parseStatusReports`; it is now a required argument. The test
+  server no longer crashes on a malformed URL escape.
+
+Reviewed and found consistent (by the reviewer's own probes, not independently re-run by me except
+where noted): the non-overlapping selection against a subset brute force on 3,000 random cases; the
+window search against an exhaustive grid on 400 random cases; sunlight segments against a 0.5 s brute
+force on 5,028 real passes (worst boundary error 12 ms); availability expansion against Luxon in 18 zones.
+Not verifiable by the reviewer, and so checked by me: the Playwright base-path run and the rendering of
+the status labels in a browser.
+
+Accepted, not changed: eclipse boundaries are sampled every 5 s (documented above); a stale
+`public/data/status.json` written by an older version is trusted as written (regenerate it with
+`npm start`); with the default relative base, opening the app as `/satellites` *without* the slash
+depends on the host's redirect (GitHub Pages does it), whereas `npm run build:satellites` does not.
+
 ## Long-range prediction limitations
 
 Orbits are propagated with SGP4 from a single set of elements. The further a
@@ -364,6 +400,6 @@ src/
   ui/            React components and styles
 scripts/         refresh-data.ts · smoke.ts · serve-subdir.mjs · e2e-smoke.mjs
 validation/      independent Skyfield comparison
-tests/           146 tests + labelled fixtures
+tests/           152 tests + labelled fixtures
 CLAUDE.md          working agreements for contributors
 ```

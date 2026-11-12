@@ -120,3 +120,43 @@ describe('date range', () => {
     expect((r.end - r.start) / HOUR).toBe(23);
   });
 });
+
+describe('review fixes: ambiguous-midnight zones and nonexistent wall times', () => {
+  it('an all-day selection tiles the range with no false gap in a zone whose DST fall-back is at midnight (Havana)', () => {
+    const s = emptyAvailability();
+    s.periods.morning = { startMin: 0, endMin: 1440 };
+    s.selected.morning.fill(true);
+    const tz = 'America/Havana';
+    const range = wide(tz, '2026-09-28', '2026-11-09');
+    const out = expandAvailability(s, tz, range);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toEqual(range);
+  });
+  it('all-day tiling also holds across ordinary DST changes in other zones', () => {
+    const s = emptyAvailability();
+    s.periods.morning = { startMin: 0, endMin: 1440 };
+    s.selected.morning.fill(true);
+    for (const tz of ['America/New_York', 'Australia/Lord_Howe', 'Asia/Kathmandu', 'Europe/London', 'America/Santiago']) {
+      for (const [a, b] of [['2027-03-01', '2027-04-15'], ['2027-10-01', '2027-11-20']] as const) {
+        const range = wide(tz, a, b);
+        expect(expandAvailability(s, tz, range), `${tz} ${a}`).toEqual([range]);
+      }
+    }
+  });
+  it('a period that starts inside the spring-forward gap keeps the real time after the gap (02:30–03:30 -> 03:00–03:30)', () => {
+    const s = emptyAvailability();
+    s.periods.morning = { startMin: 2 * 60 + 30, endMin: 3 * 60 + 30 };
+    s.selected.morning[0] = true; // Sunday 2027-03-14
+    const out = expandAvailability(s, NY, wide(NY, '2027-03-14', '2027-03-15'));
+    expect(out).toHaveLength(1);
+    expect(local(out[0]!.start, NY)).toBe('Sun 03:00');
+    expect(local(out[0]!.end, NY)).toBe('Sun 03:30');
+  });
+  it('a period that ends inside the gap ends at the gap (01:00–02:30 -> 01:00–03:00 clock time, i.e. 1 real hour)', () => {
+    const s = emptyAvailability();
+    s.periods.morning = { startMin: 60, endMin: 2 * 60 + 30 };
+    s.selected.morning[0] = true;
+    const out = expandAvailability(s, NY, wide(NY, '2027-03-14', '2027-03-15'));
+    expect((out[0]!.end - out[0]!.start) / HOUR).toBe(1);
+  });
+});
