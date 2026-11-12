@@ -172,6 +172,14 @@ The data refresh (`npm run refresh-data`) needs no secrets or API keys.
 | Repeater activity | AMSAT Satellite Status API `https://status.amsat.org/api/v1/reports.php` (documented, OpenAPI; v1.4) | JSON; values `Heard`, `Telemetry Only`, `Not Heard`, `Crew Active` | Operating status |
 | Frequencies, tones, restrictions | AMSAT "FM Satellites" web page | **Human-readable HTML only, no structured data** | Hand-maintained catalog |
 
+**When data is downloaded (today).** Only the refresh script talks to AMSAT. It runs when you type `npm start`
+(refresh, then start the dev server) or `npm run refresh-data` (`node scripts/refresh-data.ts`); nothing else
+downloads: not `npm run dev`, `build`, `preview` or `test`, and not the browser. The browser only loads the
+already-written `data/elements.json` and `data/status.json` from the site's own address, so pressing Search never
+fetches upstream data. A run makes one request for the orbital elements (retried up to three times on failure) and one
+status request per catalog repeater (17 today), spaced one second apart. No automatic refresh is configured: there is
+no workflow, scheduler or cron entry in the repository. See "Deployment prerequisites" above for what a hosted copy needs.
+
 **Refresh behavior.** `scripts/refresh-data.ts` downloads and validates the first
 two sources and writes normalized `public/data/elements.json` and
 `status.json` beside the app. The browser reads only those files (no
@@ -214,8 +222,10 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
 * **Cluster.** A cluster is a set of counted passes. Its start is the earliest full-pass AOS and its end the
   latest full-pass LOS among them (by timestamp), so its duration is the elapsed time between those endpoints,
   gaps included. Nothing is padded and there are no setup, arrival or departure buffers. The header shows exactly
-  these bounds (rounded outward to the second, so it never appears to exclude part of a pass) and the duration.
-* **Maximum cluster span.** The selected 2 / 2.5 / 3 hours is a *limit*, not a required or padded event length:
+  these bounds, to the minute and rounded outward so it never appears to exclude part of a pass, and the exact elapsed
+  time to the nearest minute (which can never exceed the maximum span). Individual pass details keep seconds, and each
+  pass shows its own "Duration".
+* **Maximum span.** The selected 2 / 2.5 / 3 hours is a *limit*, not a required or padded event length:
   a 20-minute cluster qualifies for a two-hour maximum. The cluster's span (AOS to LOS) must not exceed it.
 * **Availability.** The whole AOS-to-LOS cluster must lie inside one merged availability block (Midday +
   Evening merge into one block). A pass that begins before or ends after the block does not count, even if
@@ -241,7 +251,7 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
   that fixed interval (`schema: 2`). A pass that drifts so its full pass crosses the saved edge is flagged,
   not followed. A new event also stores the satellites that were selected when it was saved, and re-checks consider only
   those, so an unselected satellite can never appear (older records without a stored selection fall back to the
-  satellites that were originally counted, the conservative choice). Because the saved edges are exact AOS/LOS instants, a pass within 2 seconds of them still counts as
+  satellites that were originally counted, the conservative choice). Because the saved edges are exact AOS/LOS instants, a pass within 3 seconds of them still counts as
   inside (recomputing the same pass moves its edges by tens of milliseconds, which is not drift). Events saved by an earlier version (`schema: 1`, the fixed-window model) are never
   re-interpreted: they are left untouched in storage, not shown or re-checked, and the Saved tab offers an explicit
   "Remove" for them.

@@ -4,7 +4,7 @@ import type { Criteria } from '../domain/types.ts';
 import type { PredictionMeta } from '../planner.ts';
 import { PassCard } from './PassCard.tsx';
 import { Timeline } from './Timeline.tsx';
-import { fmtDay, fmtEndSec, fmtSpan, fmtStartSec, tzAbbrev } from './format.ts';
+import { fmtDay, fmtEndMin, fmtSpanMin, fmtStartMin, tzAbbrev } from './format.ts';
 
 interface Props {
   event: EventWindow;
@@ -18,8 +18,9 @@ interface Props {
 
 /**
  * One cluster. The header shows the ACTUAL cluster: earliest full-pass AOS to latest full-pass LOS of the counted
- * passes, and the elapsed time between them (gaps included). Bounds are rounded outward to the second so the header
- * never appears to exclude part of a counted pass. The selected hours are only a maximum span, never padded in.
+ * passes, and the elapsed time between them (gaps included). Clock times are shown to the minute, rounded outward so the
+ * header never appears to exclude part of a counted pass; the duration is the exact span to the nearest minute (never above
+ * the maximum). The selected hours are only a maximum span, never padded in. Pass details keep seconds.
  */
 export function EventCard({ event: e, rank, tz, criteria, meta, saved, onSave }: Props) {
   const overlapNames = (id: string) => {
@@ -36,7 +37,7 @@ export function EventCard({ event: e, rank, tz, criteria, meta, saved, onSave }:
           <p className="rank">Option {rank}</p>
           <h3 id={`ev-${rank}`}>{fmtDay(e.window.start, tz)}</h3>
           <p className="when">
-            <strong>{fmtStartSec(e.window.start, tz)} – {fmtEndSec(e.window.end, tz)}</strong> {tzAbbrev(e.window.start, tz)} · {fmtSpan(e.window.start, e.window.end)}
+            <strong>{fmtStartMin(e.window.start, tz)} – {fmtEndMin(e.window.end, tz)}</strong> {tzAbbrev(e.window.start, tz)} · {fmtSpanMin(e.window.start, e.window.end)}
           </p>
         </div>
         <button type="button" className={saved ? 'secondary saved' : 'primary'} onClick={onSave} aria-pressed={saved}>

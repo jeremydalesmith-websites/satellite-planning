@@ -11,7 +11,7 @@ import type { AvailabilitySettings, PeriodId } from '../availability/availabilit
 interface Props {
   value: AvailabilitySettings;
   onChange: (v: AvailabilitySettings) => void;
-  /** Kept for callers; the zone is shown once, in the form's compact "Times: ... · Change" line. */
+  /** Kept for callers; the zone is shown once, in the form's compact "Timezone: ... · Change" line. */
   timeZone?: string;
   invalid?: boolean;
   describedBy?: string;

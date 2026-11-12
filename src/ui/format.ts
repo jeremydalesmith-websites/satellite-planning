@@ -67,3 +67,21 @@ export function fmtAgo(ms: Ms, nowMs: Ms): string {
   const days = Math.floor(h / 24);
   return `${days} days ago`;
 }
+
+/**
+ * EVENT HEADERS show minutes only. The clock times round OUTWARD to the minute (start down, end up) so the header never
+ * appears to exclude part of a counted pass; the elapsed duration is the EXACT span rounded to the nearest minute. Because
+ * the selected maximum span is a whole number of minutes and the exact span never exceeds it, the displayed duration can
+ * never be larger than the maximum. Individual pass details keep seconds (see fmtStartSec / fmtEndSec / fmtSpan).
+ */
+export const floorMin = (ms: Ms): Ms => Math.floor(ms / 60_000) * 60_000;
+export const ceilMin = (ms: Ms): Ms => Math.ceil(ms / 60_000) * 60_000;
+export const fmtStartMin = (ms: Ms, tz: string) => fmtTime(floorMin(ms), tz);
+export const fmtEndMin = (ms: Ms, tz: string) => fmtTime(ceilMin(ms), tz);
+/** Exact elapsed time rounded to the nearest minute: "1 h 31 min", "45 min", "2 h 00 min". */
+export function fmtSpanMin(startMs: Ms, endMs: Ms): string {
+  const total = Math.round((endMs - startMs) / 60_000);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return h ? `${h} h ${String(m).padStart(2, '0')} min` : `${m} min`;
+}

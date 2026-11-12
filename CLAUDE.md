@@ -53,15 +53,16 @@ in frontend code. Use `satellite.js` for orbital mechanics; do not hand-roll it.
 * Sunlight means sunlight **at the satellite**, never local daylight.
 * Minimum elevation **selects a pass by its maximum elevation**; it does not mean only the part above X° is
   operable. A sunlight-dependent repeater must reach it during a sunlit portion. No terrain mask or adjustable
-  low-elevation cutoff exists. Do not reintroduce "usable time" wording: use "Full pass", "Sunlit operating
+  low-elevation cutoff exists. Do not reintroduce "usable time" wording: use "Duration" (a pass card), "Full pass" (timeline legend), "Sunlit operating
   interval" and "Time above X°" (information only).
 * A cluster's bounds are the earliest full-pass AOS to the latest full-pass LOS of the counted passes (by timestamp),
   duration = elapsed time between them. The selected hours are a MAXIMUM span, never padded; no setup/arrival
   buffers. The whole cluster must fit inside one availability block.
 * One operating station, conservative: passes whose FULL AOS-to-LOS envelopes overlap conflict; overlapping passes
   are shown as alternatives, never as independent opportunities. Operating time never includes eclipsed time.
-* Displayed clock times round outward to the second so a header never appears to exclude part of a counted pass, but
-  durations are computed from the exact timestamps (display rounding never feeds a scheduling constraint).
+* Event headers show clock times to the minute, rounded outward so a header never appears to exclude part of a counted
+  pass; the header duration is the exact span rounded to the nearest minute (never above the maximum span). Individual
+  pass details keep seconds. Display rounding never feeds a scheduling constraint.
 * A search uses the time it runs and never recommends the past: the range starts no earlier than that moment, and a
   pass that has already begun is not recommended. Saved-event re-checks consider only the saved satellite selection
   (records without one fall back to the originally counted satellites).

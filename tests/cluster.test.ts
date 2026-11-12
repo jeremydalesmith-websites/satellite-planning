@@ -243,6 +243,17 @@ describe('empty results explain themselves and never relax silently', () => {
   });
 });
 
+describe('the saved-event tolerance does not leak into new searches', () => {
+  it('a pass one second outside the availability block is excluded: new-search constraints are exact', () => {
+    const early = assessed({ norad: SO50, rise: -1 / 60, set: 10, maxEl: 60 }); // AOS one second before the block starts
+    expect(find([early, P(20, 30)], block(0, 600), 2)).toEqual([]);
+    expect(find([P(20, 30), assessed({ norad: SO50, rise: 590, set: 600 + 1 / 60, maxEl: 60 })], block(0, 600), 2)).toEqual([]); // LOS one second after the end
+  });
+  it('a cluster one second longer than the maximum span is rejected', () => {
+    expect(find([P(0, 10), assessed({ norad: SO50, rise: 140, set: 150 + 1 / 60, maxEl: 60 })], block(0, 600), 2, 150)).toEqual([]);
+  });
+});
+
 describe('a FIXED interval (saved event) is evaluated by whole passes, with drift reported', () => {
   const win = iv(100, 250);
   it('a pass counts only if its whole AOS-to-LOS fits inside; one that merely overlaps is reported as an edge case', () => {

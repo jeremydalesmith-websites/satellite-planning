@@ -54,7 +54,7 @@ export function PassCard({ pass: p, role, tz, overlapNames, statusDownloadedAt }
       </header>
       {why && <p className="why">{why}</p>}
       <dl className="key">
-        <div>
+        <div className="aos-los">
           <dt>AOS–LOS</dt>
           <dd>{fmtStartSec(p.riseMs, tz)} – {fmtEndSec(p.setMs, tz)}</dd>
         </div>
@@ -69,7 +69,7 @@ export function PassCard({ pass: p, role, tz, overlapNames, statusDownloadedAt }
           </dd>
         </div>
         <div>
-          <dt>Full pass</dt>
+          <dt>Duration</dt>
           <dd>{fmtSpan(p.riseMs, p.setMs)}</dd>
         </div>
         {showOperating && (

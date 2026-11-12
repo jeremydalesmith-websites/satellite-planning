@@ -66,9 +66,11 @@ export const RESULT_LIMIT = 25;
 /**
  * A saved cluster interval is anchored exactly on a pass's AOS and LOS. Recomputing the same pass moves those instants
  * by tens of milliseconds (the predictor refines crossings to a bisection tolerance), so a pass counts as inside the
- * saved interval if it is within this many seconds of it. Far below the 60 s shifts reported as real changes.
+ * saved interval if it is within this many seconds of it (a shift under this, by itself, neither flags a change nor drops
+ * a counted pass). It applies ONLY to saved-event re-checks: new searches use exact comparisons. Far below the 60 s
+ * shifts reported as real changes.
  */
-export const SAVED_EDGE_TOLERANCE_SEC = 2;
+export const SAVED_EDGE_TOLERANCE_SEC = 3;
 
 /** Changes smaller than these are not reported as "meaningful" for saved events. */
 export const SAVED_SHIFT_REPORT_SEC = 60;

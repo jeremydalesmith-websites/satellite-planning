@@ -118,6 +118,21 @@ describe('saved events stay fixed and report meaningful changes', () => {
     expect(r.countNow).toBe(3);
     expect(r.meetsMinimum).toBe(true);
   });
+  it('timing shifts under 3 seconds at EITHER saved boundary neither flag a change nor drop a counted pass; 3 s is the limit', () => {
+    const shift = (p: ReturnType<typeof P>, dRise: number, dSet: number) => ({ ...p, riseMs: p.riseMs + dRise, setMs: p.setMs + dSet, envelope: { start: p.riseMs + dRise, end: p.setMs + dSet } });
+    for (const [dRise, dSet] of [[-2_999, 2_999], [-2_000, 1_000], [-3_000, 3_000]] as const) {
+      const r = recheckEvent(saved, [shift(original[0]!, dRise, 0), original[1]!, shift(original[2]!, 0, dSet)]);
+      expect(r.changes).toEqual([]);
+      expect(r.countNow).toBe(3);
+    }
+  });
+  it('a shift just over 3 seconds at a saved boundary is flagged, at the start and at the end', () => {
+    const shift = (p: ReturnType<typeof P>, dRise: number, dSet: number) => ({ ...p, riseMs: p.riseMs + dRise, setMs: p.setMs + dSet, envelope: { start: p.riseMs + dRise, end: p.setMs + dSet } });
+    const late = recheckEvent(saved, [original[0]!, original[1]!, shift(original[2]!, 0, 3_001)]);
+    expect(late.changes.some((c) => c.kind === 'lost' && /extends outside the saved interval/.test(c.text))).toBe(true);
+    const early = recheckEvent(saved, [shift(original[0]!, -3_001, 0), original[1]!, original[2]!]);
+    expect(early.changes.some((c) => c.kind === 'lost' && /extends outside the saved interval/.test(c.text))).toBe(true);
+  });
   it('but a real slip of a few seconds beyond the tolerance is still flagged', () => {
     const slip = { ...original[2]!, setMs: original[2]!.setMs + 5_000, envelope: { start: original[2]!.riseMs, end: original[2]!.setMs + 5_000 } };
     const r = recheckEvent(saved, [original[0]!, original[1]!, slip]);

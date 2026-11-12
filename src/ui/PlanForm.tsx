@@ -78,7 +78,10 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
   }, [f.latText, f.lonText, f.timeZone, f.minElevationText, f.durationMin, f.minOpportunitiesText, f.availability, chosen]);
 
   const set = <K extends keyof FormFields>(k: K, v: FormFields[K]) => setF((p) => ({ ...p, [k]: v }));
-  const { errors } = useMemo(() => validateForm(f, Date.now()), [f]); // for displaying messages; a search re-validates at click time
+  // Messages are validated against the CURRENT time. `clock` is bumped when Search is pressed, so a range that has
+  // passed since the form was last edited (an idle tab) is reported at that moment instead of silently doing nothing.
+  const [clock, setClock] = useState(0);
+  const { errors } = useMemo(() => validateForm(f, Date.now()), [f, clock]);
   const err = (k: FieldKey): FormErrors | undefined => (submitted ? errors.find((e) => e.field === k) : undefined);
 
   const submit = (e: React.FormEvent) => {
@@ -86,6 +89,7 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
     setSubmitted(true);
     // Validate against the time of THIS click: the memoised result may be hours old if the tab sat idle.
     const fresh = validateForm(f, Date.now()).inputs;
+    setClock((c) => c + 1); // re-validate for display with the same fresh time
     if (fresh) onSearch({ ...fresh, selectedNoradIds: selected });
   };
 
@@ -157,7 +161,7 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
         <span className="field-err" id="end-err">{err('endDate')?.message}</span>
         {/* Time zone: the browser's zone unless the user saved another. Not derived from the coordinates. */}
         <p className="tz-line">
-          Times: <strong>{f.timeZone || 'unset'}</strong> ·{' '}
+          Timezone: <strong>{f.timeZone || 'unset'}</strong> ·{' '}
           <button type="button" className="link" aria-expanded={tzOpen || !!err('timeZone')} aria-controls="tz-field" onClick={() => setTzOpen((o) => !o)}>
             Change
           </button>
@@ -175,7 +179,7 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
       </fieldset>
 
       <fieldset>
-        <legend>Pass requirements</legend>
+        <legend>Requirements</legend>
         <div className="row two">
           <label>
             Minimum peak elevation (°)
@@ -188,7 +192,7 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
             <span className="field-err" id="opp-err">{err('minOpportunitiesText')?.message}</span>
           </label>
         </div>
-        <span className="seg-label" id="span-label">Maximum cluster span</span>
+        <span className="seg-label" id="span-label">Maximum span</span>
         <div className="seg" role="radiogroup" aria-labelledby="span-label">
           {EVENT_DURATIONS_MIN.map((m) => (
             <label key={m} className={f.durationMin === m ? 'on' : ''}>

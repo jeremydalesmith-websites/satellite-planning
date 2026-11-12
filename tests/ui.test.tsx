@@ -169,7 +169,7 @@ describe('plan form', () => {
     expect((screen.getByLabelText(/Minimum peak elevation/) as HTMLInputElement).value).toBe('40');
     expect((screen.getByLabelText(/Opportunities needed/) as HTMLInputElement).value).toBe('3');
     const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    expect(screen.getByText(/^Times:/).textContent).toContain(browserTz);
+    expect(screen.getByText(/^Timezone:/).textContent).toContain(browserTz);
     expect(screen.queryByLabelText('Time zone')).toBeNull(); // the editable control is hidden until "Change"
     await userEvent.click(screen.getByRole('button', { name: 'Change' }));
     expect((screen.getByLabelText('Time zone') as HTMLInputElement).value).toBe(browserTz);
@@ -180,7 +180,7 @@ describe('plan form', () => {
   it('a saved time zone is preserved and shown; the browser zone is only the default when nothing is saved', () => {
     savePrefs({ latText: '', lonText: '', timeZone: 'Pacific/Auckland', minElevationText: '40', durationMin: 150, minOpportunitiesText: '3', availability: emptyAvailability() });
     render(<PlanForm busy={false} onSearch={() => {}} />);
-    expect(screen.getByText(/^Times:/).textContent).toContain('Pacific/Auckland');
+    expect(screen.getByText(/^Timezone:/).textContent).toContain('Pacific/Auckland');
   });
   it('the removed explanatory text is gone, the dates use a dash with accessible labels, and nothing claims the zone comes from coordinates', () => {
     const { container } = render(<PlanForm busy={false} onSearch={() => {}} />);
@@ -194,7 +194,8 @@ describe('plan form', () => {
     ]) expect(text).not.toContain(gone);
     expect(screen.getByText('Dates')).toBeTruthy();
     expect(screen.getByText('Location')).toBeTruthy();
-    expect(screen.getByText('Pass requirements')).toBeTruthy();
+    expect(screen.getByText('Requirements')).toBeTruthy();
+    expect(screen.queryByText('Pass requirements')).toBeNull();
     expect(screen.queryByText('What counts as a good pass?')).toBeNull();
     expect(text).not.toContain('Higher elevation means a stronger, longer pass');
     expect(screen.queryByText('Where will the event be?')).toBeNull();

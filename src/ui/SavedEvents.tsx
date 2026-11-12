@@ -5,7 +5,7 @@ import { recheckSavedEvent } from '../saved/recheck.ts';
 import type { SavedEvent } from '../saved/saved.ts';
 import { PassCard } from './PassCard.tsx';
 import { Timeline } from './Timeline.tsx';
-import { fmtDateTime, fmtDay, fmtEndSec, fmtSpan, fmtStartSec, fmtTime, tzAbbrev } from './format.ts';
+import { fmtDateTime, fmtDay, fmtEndMin, fmtSpanMin, fmtStartMin, fmtTime, tzAbbrev } from './format.ts';
 
 interface Props {
   events: SavedEvent[];
@@ -33,7 +33,7 @@ export function SavedEvents({ events, data, nowMs, onDelete, legacyCount = 0, on
       <section className="card">
         <h2>Saved events</h2>
         <LegacyNotice count={legacyCount} onClear={onClearLegacy} />
-        <p>No saved events yet. Save one from the search results and it will be re-checked here against fresh data. The date and time you save never move on their own.</p>
+        <p>No saved events yet. Save one from the search results; its date and time stay fixed.</p>
       </section>
     );
   }
@@ -42,9 +42,7 @@ export function SavedEvents({ events, data, nowMs, onDelete, legacyCount = 0, on
     <section aria-labelledby="saved-title">
       <h2 id="saved-title">Saved events</h2>
       <LegacyNotice count={legacyCount} onClear={onClearLegacy} />
-      <p className="hint">
-        Each event keeps its saved cluster interval. Opening this page re-checks the 72-hour eligibility rule against the current time ({fmtDateTime(nowMs, events[0]!.timeZone)}) using the status reports already downloaded; it does not download new reports.
-      </p>
+      <p className="hint">Saved event times stay fixed. Satellite status is checked using previously downloaded reports.</p>
       {sorted.map((ev) => <SavedCard key={ev.id} ev={ev} data={data} nowMs={nowMs} onDelete={() => onDelete(ev.id)} />)}
     </section>
   );
@@ -61,7 +59,7 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
         <div>
           <h3>{fmtDay(ev.window.start, tz)}</h3>
           <p className="when">
-            <strong>{fmtStartSec(ev.window.start, tz)} – {fmtEndSec(ev.window.end, tz)}</strong> {tzAbbrev(ev.window.start, tz)} · {fmtSpan(ev.window.start, ev.window.end)}
+            <strong>{fmtStartMin(ev.window.start, tz)} – {fmtEndMin(ev.window.end, tz)}</strong> {tzAbbrev(ev.window.start, tz)} · {fmtSpanMin(ev.window.start, ev.window.end)}
           </p>
           <p className="hint small">
             Needs {c.minOpportunities}+ passes peaking at {c.minElevationDeg}°+ · location {ev.location.latDeg.toFixed(2)}, {ev.location.lonDeg.toFixed(2)} · saved {fmtDateTime(ev.savedAtMs, tz)}

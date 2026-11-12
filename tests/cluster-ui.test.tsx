@@ -10,7 +10,7 @@ import { snapshotEvent } from '../src/saved/saved.ts';
 import { PlanForm } from '../src/ui/PlanForm.tsx';
 import { Results } from '../src/ui/Results.tsx';
 import { SavedEvents } from '../src/ui/SavedEvents.tsx';
-import { ceilSec, floorSec, fmtSpan } from '../src/ui/format.ts';
+import { ceilMin, ceilSec, floorMin, floorSec, fmtSpan, fmtSpanMin } from '../src/ui/format.ts';
 import { T0, at, geom } from './factory.ts';
 import { elementsFixture } from './helpers.ts';
 
@@ -38,22 +38,30 @@ const iss = geom({ norad: 25544, rise: 96, set: 109, maxEl: 50, above: [101, 104
 const plan = (passes = [so50, iss]) => computePlan(inputs, data, passes, [], [], T0);
 const show = (p = plan()) => render(<Results inputs={inputs} result={p} nowMs={T0} isSaved={() => false} onSave={() => {}} statusProblem={null} />);
 
-describe('event header shows the ACTUAL cluster, never rounded inward', () => {
-  it('bounds are the earliest AOS and latest LOS, rounded OUTWARD to the second, with the exact elapsed time', () => {
+describe('event header shows the ACTUAL cluster to the minute, never rounded inward', () => {
+  it('bounds are the earliest AOS and latest LOS shown to the minute (no seconds), with the exact elapsed time in minutes', () => {
     const { container } = show();
     const when = container.querySelector('.event .when')!.textContent!;
-    // AOS 3:56:00.4 PM -> shown 3:56:00 PM (down); LOS 4:49:00 PM; elapsed 52 min 60 s = 53 min 00 s
-    expect(when).toContain('3:56:00 PM – 4:49:00 PM');
-    expect(when).toContain('53 min 00 s');
+    // AOS 3:56:00.4 PM -> shown 3:56 PM; LOS 4:49:00.0 PM; exact elapsed 52 min 59.6 s -> 53 min
+    expect(when).toContain('3:56 PM – 4:49 PM');
+    expect(when).toContain('· 53 min');
+    expect(when).not.toMatch(/:\d\d:\d\d/); // no seconds anywhere in the header
+    expect(when).not.toMatch(/\d s\b/);
     expect(when).not.toMatch(/2\.5|150|hours/); // the maximum span is not shown as the event length
   });
-  it('a LOS that is a fraction of a second late is shown rounded UP, so the header still contains the whole pass', () => {
-    const p = plan([so50, geom({ norad: 25544, rise: 96, set: 109, maxEl: 50, above: [101, 104] })]);
+  it('a LOS that is a fraction of a second into the next minute is shown rounded UP, so the header still contains the whole pass', () => {
+    const lateIss = geom({ norad: 25544, rise: 96, set: 109, maxEl: 50, above: [101, 104] });
+    lateIss.setMs += 400; // LOS 4:49:00.4 PM
+    const p = plan([so50, lateIss]);
     const lastSet = Math.max(...p.windows[0]!.counted.map((c) => c.setMs));
-    expect(ceilSec(lastSet)).toBeGreaterThanOrEqual(lastSet);
-    expect(floorSec(p.windows[0]!.window.start)).toBeLessThanOrEqual(p.windows[0]!.window.start);
+    expect(ceilMin(lastSet)).toBeGreaterThanOrEqual(lastSet);
+    expect(floorMin(p.windows[0]!.window.start)).toBeLessThanOrEqual(p.windows[0]!.window.start);
     const { container } = show(p);
-    expect(container.querySelector('.event .when')!.textContent).toContain('4:49:00 PM');
+    expect(container.querySelector('.event .when')!.textContent).toContain('3:56 PM – 4:50 PM'); // outward, not 4:49
+  });
+  it('individual pass details keep their seconds (AOS-LOS to the second, outward)', () => {
+    const { container } = show();
+    expect(container.querySelector('article.pass dl.key')!.textContent).toContain('3:56:00 PM – 4:08:01 PM');
   });
   it('the cluster is not padded to the selected maximum: its exact span is 52 min 59.6 s, not 2.5 hours', () => {
     const w = plan().windows[0]!;
@@ -62,7 +70,32 @@ describe('event header shows the ACTUAL cluster, never rounded inward', () => {
   });
 });
 
-describe('format helpers never round a bound inward', () => {
+describe('header duration: exact, to the nearest minute, never above the maximum', () => {
+  it('fmtSpanMin rounds the EXACT elapsed time and never exceeds a whole-minute maximum', () => {
+    const start = Date.UTC(2027, 0, 9, 10, 0, 0, 600);
+    expect(fmtSpanMin(start, Date.UTC(2027, 0, 9, 12, 0, 0, 400))).toBe('2 h 00 min'); // exact 7199.8 s: not "2 h 01 min"
+    expect(fmtSpanMin(0, 7_200_000)).toBe('2 h 00 min');
+    expect(fmtSpanMin(0, 7_199_999)).toBe('2 h 00 min');
+    expect(fmtSpanMin(0, 5_459_000)).toBe('1 h 31 min'); // 90 min 59 s
+    expect(fmtSpanMin(0, 27 * 60_000 + 10_000)).toBe('27 min');
+    const minutes = (s: string) => { const m = /(?:(\d+) h )?(\d+) min/.exec(s)!; return Number(m[1] ?? 0) * 60 + Number(m[2]); };
+    for (const maxMin of [120, 150, 180]) {
+      for (const exactMs of [maxMin * 60_000, maxMin * 60_000 - 1, maxMin * 60_000 - 29_999, maxMin * 60_000 - 30_001]) {
+        expect(minutes(fmtSpanMin(1234, 1234 + exactMs))).toBeLessThanOrEqual(maxMin);
+      }
+    }
+  });
+  it('a cluster of exactly the maximum span is displayed as that maximum, not above it', () => {
+    const a = geom({ norad: 27607, rise: 56, set: 68, maxEl: 70 });
+    const b = geom({ norad: 25544, rise: 196, set: 206, maxEl: 50 }); // 56 -> 206 minutes = exactly 150
+    const p = computePlan({ ...inputs, criteria: { ...inputs.criteria, maxSpanMin: 150 } }, data, [a, b], [], [], T0);
+    expect(p.windows).toHaveLength(1);
+    const { container } = show(p);
+    expect(container.querySelector('.event .when')!.textContent).toContain('2 h 30 min');
+  });
+});
+
+describe('format helpers never round a clock time inward', () => {
   it('floorSec/ceilSec move clock times outward, while fmtSpan measures the exact elapsed time', () => {
     for (const ms of [0, 1, 999, 1000, 1001, 123_456, 86_399_999]) {
       expect(floorSec(ms)).toBeLessThanOrEqual(ms);
@@ -79,7 +112,8 @@ describe('pass card: full pass up front, details behind Details, no ambiguous "u
     const { container } = show();
     const card = container.querySelector('article.pass')!;
     const main = card.querySelector('dl.key')!.textContent!;
-    for (const label of ['AOS–LOS', 'Peak', 'Max elevation', 'Full pass']) expect(main).toContain(label);
+    for (const label of ['AOS–LOS', 'Peak', 'Max elevation', 'Duration']) expect(main).toContain(label);
+    expect(main).not.toContain('Full pass'); // the individual pass duration is now labelled "Duration"
     expect(main).toContain('12 min 00 s'); // exact 12 min 00.2 s; the clock times beside it show 3:56:00 PM – 4:08:01 PM (outward)
     expect(main).not.toContain('Time above');
     const details = card.querySelector('details.more')!;
@@ -110,7 +144,7 @@ describe('timeline scales to the actual cluster', () => {
     const left = (el: HTMLElement) => parseFloat(el.style.left);
     expect(left(lanes[0]!)).toBeGreaterThan(0); // padded, not flush with the edge
     expect(left(lanes[0]!)).toBeLessThan(10); // but modest
-    expect(container.querySelector('.event .when')!.textContent).toContain('3:56:00 PM – 4:49:00 PM'); // pad does not change the header
+    expect(container.querySelector('.event .when')!.textContent).toContain('3:56 PM – 4:49 PM'); // pad does not change the header
   });
   it('marks the shadowed part of a sunlight-restricted pass as not permitted', () => {
     const ao = geom({ norad: 43017, rise: 56, set: 68, maxEl: 70, sun: [[56, 61, true, 55], [61, 68, false, 70]] });
@@ -132,10 +166,11 @@ describe('results wording', () => {
 });
 
 describe('the span control', () => {
-  it('is labelled "Maximum cluster span"', () => {
+  it('is labelled "Maximum span"', () => {
     render(<PlanForm busy={false} onSearch={() => {}} />);
-    expect(screen.getByText('Maximum cluster span')).toBeTruthy();
-    expect(screen.getByRole('radiogroup', { name: 'Maximum cluster span' })).toBeTruthy();
+    expect(screen.getByText('Maximum span')).toBeTruthy();
+    expect(screen.getByRole('radiogroup', { name: 'Maximum span' })).toBeTruthy();
+    expect(screen.queryByText('Maximum cluster span')).toBeNull();
     expect(screen.queryByRole('radiogroup', { name: 'Event duration' })).toBeNull();
   });
   it('passes the chosen hours to the search as the maximum cluster span', async () => {
@@ -182,6 +217,30 @@ describe('saved events: new format, and old-format entries handled without delet
   it('a new saved event shows the saved cluster interval exactly as in its header', () => {
     const ev = fresh();
     const { container } = render(<SavedEvents events={[ev]} data={null} nowMs={T0} onDelete={() => {}} />);
-    expect(container.querySelector('article.saved .when')!.textContent).toContain('3:56:00 PM – 4:49:00 PM');
+    expect(container.querySelector('article.saved .when')!.textContent).toContain('3:56 PM – 4:49 PM UTC · 53 min');
+  });
+});
+
+describe('wording and structure', () => {
+  it('the individual pass card keeps the timeline legend wording ("Full pass") but labels the pass length "Duration"', () => {
+    const { container } = show();
+    expect(container.querySelector('.tl-legend')!.textContent).toContain('Full pass'); // legend untouched
+    expect(container.querySelector('article.pass dl.key')!.textContent).toContain('Duration');
+  });
+  it('the AOS-LOS range is marked as secondary (muted gray via the stylesheet)', () => {
+    const { container } = show();
+    expect(container.querySelector('article.pass dl.key .aos-los')).not.toBeNull();
+    expect(container.querySelector('article.pass dl.key .aos-los dt')!.textContent).toBe('AOS–LOS');
+  });
+  it('Saved events: the empty state no longer claims a "fresh data" re-check, and the introduction is the new sentence', () => {
+    const empty = render(<SavedEvents events={[]} data={null} nowMs={T0} onDelete={() => {}} />);
+    expect(empty.container.textContent).not.toMatch(/fresh data|re-checked here/i);
+    expect(empty.container.textContent).toContain('No saved events yet. Save one from the search results; its date and time stay fixed.');
+    empty.unmount();
+    const meta = { generatedAtMs: T0, elementsDownloadedAt: new Date(T0).toISOString(), statusDownloadedAt: null, epochs: {} };
+    const ev = snapshotEvent(plan().windows[0]!, { latDeg: 1, lonDeg: 2 }, 'UTC', inputs.criteria, meta, T0, 'x');
+    const full = render(<SavedEvents events={[ev]} data={null} nowMs={T0} onDelete={() => {}} />);
+    const intro = full.container.querySelector('p.hint')!.textContent;
+    expect(intro).toBe('Saved event times stay fixed. Satellite status is checked using previously downloaded reports.');
   });
 });

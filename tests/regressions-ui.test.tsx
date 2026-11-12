@@ -47,6 +47,40 @@ describe('finding 1: pressing Search uses the time of the click, not the time of
   });
 });
 
+describe('validation: a date range that has fully passed is reported when Search is clicked', () => {
+  const prime = () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.UTC(2027, 0, 9, 12, 0, 0)); // the form is filled in on 9 Jan with its default 28-day range
+    const av = emptyAvailability();
+    av.selected.evening[6] = true;
+    savePrefs({ latText: '42.35', lonText: '-71.06', timeZone: 'UTC', minElevationText: '40', durationMin: 150, minOpportunitiesText: '3', availability: av });
+  };
+  it('shows the fresh error instead of silently doing nothing, and does not search', () => {
+    prime();
+    const onSearch = vi.fn();
+    render(<PlanForm busy={false} onSearch={onSearch} />);
+    vi.setSystemTime(Date.UTC(2027, 2, 1, 9, 0, 0)); // searched on 1 March: the whole range (to 5 Feb) is now in the past
+    fireEvent.click(screen.getByRole('button', { name: 'Find event windows' }));
+    expect(onSearch).not.toHaveBeenCalled();
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toMatch(/entirely in the past/);
+    expect(document.getElementById('end-err')!.textContent).toMatch(/entirely in the past/); // also next to the dates
+  });
+  it('the error clears once the dates are corrected, and a valid search then goes ahead', () => {
+    prime();
+    const onSearch = vi.fn();
+    render(<PlanForm busy={false} onSearch={onSearch} />);
+    vi.setSystemTime(Date.UTC(2027, 2, 1, 9, 0, 0));
+    fireEvent.click(screen.getByRole('button', { name: 'Find event windows' }));
+    expect(screen.queryByRole('alert')).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Start date'), { target: { value: '2027-03-02' } });
+    fireEvent.change(screen.getByLabelText('End date'), { target: { value: '2027-03-20' } });
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Find event windows' }));
+    expect(onSearch).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('finding 5: result cards have stable, unique keys', () => {
   it('two clusters that start at the same instant do not trigger React\'s duplicate-key warning', () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -144,5 +178,19 @@ describe('data freshness: a compact status-age indicator, judged from the STATUS
     const withProblem = show(none, T0, 'Operating-status data is unavailable (HTTP 404). No satellite can be confirmed eligible without it, so none will be planned.');
     expect(withProblem.container.querySelector('.status-age')).toBeNull();
     expect(withProblem.container.textContent).toMatch(/Operating-status data is unavailable \(HTTP 404\)/);
+  });
+});
+
+describe('page heading', () => {
+  it('shows "Satellite Pass Planner" with the new subtitle', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (u: URL | string) => {
+      const files: Record<string, unknown> = { 'elements.json': elementsFixture, 'status.json': status() };
+      const key = Object.keys(files).find((k) => String(u).endsWith(k));
+      return new Response(key ? JSON.stringify(files[key]) : 'nope', { status: key ? 200 : 404, headers: { 'content-type': 'application/json' } });
+    }));
+    const { container } = render(<App />);
+    expect(container.querySelector('h1')!.textContent).toBe('Satellite Pass Planner');
+    expect(container.querySelector('.subtitle')!.textContent).toBe('Find FM satellite pass clusters for your next club event.');
+    await screen.findByText('Data and timing'); // let the data load settle before the test ends
   });
 });

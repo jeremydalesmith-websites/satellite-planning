@@ -131,7 +131,10 @@ export function App() {
   return (
     <div className="app">
       <header className="top">
-        <h1>FM Satellite Event Planner</h1>
+        <div className="brand">
+          <h1>Satellite Pass Planner</h1>
+          <p className="subtitle">Find FM satellite pass clusters for your next club event.</p>
+        </div>
         <nav aria-label="Sections">
           <button type="button" className={tab === 'plan' ? 'tab on' : 'tab'} aria-current={tab === 'plan' ? 'page' : undefined} onClick={() => openTab('plan')}>Plan</button>
           <button type="button" className={tab === 'saved' ? 'tab on' : 'tab'} aria-current={tab === 'saved' ? 'page' : undefined} onClick={() => openTab('saved')}>
