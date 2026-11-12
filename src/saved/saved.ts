@@ -9,6 +9,7 @@
 import { SAVED_ELEVATION_REPORT_DEG, SAVED_MATCH_TOLERANCE_MIN, SAVED_SHIFT_REPORT_SEC } from '../domain/policy.ts';
 import type { Criteria, Interval, Ms } from '../domain/types.ts';
 import type { PassAssessment } from '../eligibility/assess.ts';
+import { exclusionReason } from '../eligibility/status.ts';
 import type { StatusState } from '../eligibility/status.ts';
 import { evaluateWindow } from '../cluster/cluster.ts';
 import type { EventWindow, WindowEvaluation } from '../cluster/cluster.ts';
@@ -82,7 +83,16 @@ export function snapshotEvent(
   };
 }
 
-export type ChangeKind = 'lost' | 'added' | 'shifted' | 'elevation' | 'status';
+export type ChangeKind = 'lost' | 'added' | 'shifted' | 'elevation' | 'status' | 'eligibility';
+
+/** A saved opportunity whose satellite no longer has the evidence the planner requires. */
+export interface LostEligibility {
+  noradId: number;
+  name: string;
+  peakMs: Ms;
+  /** Why the evidence is missing, e.g. "no qualifying FM report in the last 72 hours". */
+  reason: string;
+}
 
 export interface Change {
   kind: ChangeKind;
@@ -93,6 +103,8 @@ export interface Change {
 export interface Recheck {
   evaluation: WindowEvaluation;
   changes: Change[];
+  /** Saved opportunities flagged because eligibility can no longer be established. Never silently kept as eligible. */
+  lostEligibility: LostEligibility[];
   countNow: number;
   countBefore: number;
   meetsMinimum: boolean;
@@ -111,19 +123,28 @@ const fmtShift = (sec: number) => {
 export function recheckEvent(saved: SavedEvent, assessments: readonly PassAssessment[]): Recheck {
   const evaluation = evaluateWindow(saved.window, assessments);
   const tolerance = SAVED_MATCH_TOLERANCE_MIN * 60_000;
-  const universe: Array<{ a: PassAssessment; where: 'counted' | 'alternative' | 'conditional' | 'edge' | 'excluded' }> = [
+  const universe: Array<{ a: PassAssessment; where: 'counted' | 'alternative' | 'edge' | 'excluded' }> = [
     ...evaluation.counted.map((a) => ({ a, where: 'counted' as const })),
     ...evaluation.alternatives.map((a) => ({ a, where: 'alternative' as const })),
-    ...evaluation.conditional.map((a) => ({ a, where: 'conditional' as const })),
     ...evaluation.edge.map((a) => ({ a, where: 'edge' as const })),
     ...evaluation.excluded.map((a) => ({ a, where: 'excluded' as const })),
   ];
+  // Passes of satellites that lack a qualifying recent FM report (never shown as passes).
+  const ineligible = assessments.filter((a) => a.exclusion === 'status');
   const changes: Change[] = [];
+  const lostEligibility: LostEligibility[] = [];
   const matchedNow = new Set<string>();
 
   for (const old of saved.original.counted) {
     const m = universe.find((u) => u.a.noradId === old.noradId && Math.abs(u.a.peakMs - old.peakMs) <= tolerance && !matchedNow.has(u.a.passId));
     if (!m) {
+      const inel = ineligible.find((a) => a.noradId === old.noradId && Math.abs(a.peakMs - old.peakMs) <= tolerance);
+      if (inel) {
+        const reason = exclusionReason(inel.status) ?? 'eligibility cannot be established';
+        lostEligibility.push({ noradId: old.noradId, name: old.name, peakMs: old.peakMs, reason });
+        changes.push({ kind: 'eligibility', text: `${old.name} pass no longer counts: ${reason}. The saved date and time have not moved.` });
+        continue;
+      }
       changes.push({ kind: 'lost', text: `${old.name} pass no longer appears: it no longer reaches ${saved.criteria.minElevationDeg}° within this event.` });
       continue;
     }
@@ -131,7 +152,6 @@ export function recheckEvent(saved: SavedEvent, assessments: readonly PassAssess
     if (m.where !== 'counted') {
       const why: Record<string, string> = {
         alternative: 'it now overlaps another counted pass',
-        conditional: `its repeater status is now unconfirmed (${m.a.status.label.toLowerCase()})`,
         edge: 'its usable part now extends past the event start or end',
         excluded: m.a.reasons[0] ?? 'it is no longer usable',
       };
@@ -159,6 +179,7 @@ export function recheckEvent(saved: SavedEvent, assessments: readonly PassAssess
   return {
     evaluation,
     changes,
+    lostEligibility,
     countNow: evaluation.counted.length,
     countBefore: saved.original.counted.length,
     meetsMinimum: evaluation.counted.length >= saved.criteria.minOpportunities,

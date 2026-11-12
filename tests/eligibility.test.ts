@@ -9,8 +9,8 @@ const file = (key: string, reports: StatusFile['satellites'][string]['reports'])
   schema: 1, source: { name: 't', url: 'u', license: 'x' }, downloadedAt: new Date(NOW).toISOString(),
   satellites: { [key]: { reports } },
 });
-const so50 = { amsatStatusKey: 'SO-50_[FM]', scheduleDependent: false };
-const iss = { amsatStatusKey: 'ISS_[FM]', scheduleDependent: true };
+const so50 = { amsatStatusKey: 'SO-50_[FM]', interruptible: false, activationRequired: false };
+const iss = { amsatStatusKey: 'ISS_[FM]', interruptible: true, activationRequired: false };
 
 describe('operating status policy', () => {
   it('recent "Heard" with nothing newer = recently reported active, counts', () => {
@@ -28,16 +28,20 @@ describe('operating status policy', () => {
     expect(s.countsTowardMinimum).toBe(false);
     expect(s.state).not.toBe('recently-reported-active');
   });
-  it('unconfirmed schedule-dependent repeater is schedule-dependent and does not count', () => {
+  it('an interruptible repeater (ISS) with nothing recent is treated like any other: no recent reports, does not count', () => {
     const s = classifyStatus(iss, file('ISS_[FM]', []), NOW);
-    expect(s.state).toBe('schedule-dependent');
+    expect(s.state).toBe('unknown-stale');
+    expect(s.detail).toBe('no-recent-reports');
     expect(s.countsTowardMinimum).toBe(false);
   });
-  it('schedule-dependent but recently confirmed can count, with the caveat kept', () => {
+  it('an interruptible repeater with a recent "Heard" counts, with the interruption caveat kept', () => {
     const s = classifyStatus(iss, file('ISS_[FM]', [[hoursAgo(3), 'H', 0]]), NOW);
     expect(s.state).toBe('recently-reported-active');
-    expect(s.scheduleDependent).toBe(true);
-    expect(s.explanation).toMatch(/only at certain times/);
+    expect(s.countsTowardMinimum).toBe(true);
+    expect(s.interruptible).toBe(true);
+    expect(s.activationRequired).toBe(false);
+    expect(s.explanation).toMatch(/subject to interruptions/);
+    expect(s.explanation).not.toMatch(/only at certain times|astronaut/i);
   });
   it('repeated negatives from several operators = known unavailable', () => {
     const s = classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'N', 0], [hoursAgo(2), 'T', 1]]), NOW);
@@ -124,11 +128,18 @@ describe('verdicts from status', () => {
   const base = { rise: 0, set: 10, maxEl: 60 as number, above: [4, 6] as [number, number] };
   it.each([
     ['recently-reported-active', 'eligible'],
-    ['unknown-stale', 'conditional'],
-    ['schedule-dependent', 'conditional'],
+    ['unknown-stale', 'excluded'],
+    ['activation-required', 'excluded'],
     ['known-unavailable', 'excluded'],
   ] as const)('%s -> %s', (st, verdict) => {
     expect(assessed(base, st).verdict).toBe(verdict);
+  });
+  it('every status other than recently-reported-active is excluded for lack of evidence (exclusion "status"), never "conditional"', () => {
+    for (const st of ['unknown-stale', 'activation-required', 'known-unavailable'] as const) {
+      const a = assessed(base, st);
+      expect(a.exclusion).toBe('status');
+      expect(a.reasons[0]).toMatch(st === 'activation-required' ? /requires a confirmed activation window/ : /no qualifying FM report/);
+    }
   });
 });
 
@@ -140,7 +151,7 @@ describe('FM-mode matching: other modes and beacons can never establish FM avail
 
   it('lots of "Heard" reports under OTHER modes of the same satellite are ignored (classifier reads only the FM key)', () => {
     const f = fileWith({ 'ISS_[Crew]': { reports: loud }, 'ISS_[SSTV]': { reports: loud }, 'ISS_[VHF_Digi]': { reports: loud }, 'ISS_[FM]': { reports: [] } });
-    const s = classifyStatus({ amsatStatusKey: 'ISS_[FM]', scheduleDependent: true }, f, NOW);
+    const s = classifyStatus(iss, f, NOW);
     expect(s.countsTowardMinimum).toBe(false);
     expect(s.detail).toBe('no-recent-reports');
   });
@@ -171,10 +182,16 @@ describe('three kinds of "no" are distinct in label, detail and wording', () => 
   it('details and policy outcome', () => {
     expect([notHeard.detail, mixed.detail, confirmed.detail]).toEqual(['not-heard', 'mixed', 'confirmed-unavailable']);
     expect([notHeard.state, mixed.state, confirmed.state]).toEqual(['unknown-stale', 'unknown-stale', 'known-unavailable']);
-    // only "confirmed unavailable" is excluded; the others stay conditional. None counts.
+    // None counts, and none is shown in results: all three are excluded from planning for lack of evidence.
     expect([notHeard, mixed, confirmed].every((s) => !s.countsTowardMinimum)).toBe(true);
   });
-  it('a schedule-dependent repeater with nothing recent keeps the schedule wording', () => {
-    expect(classifyStatus(iss, file('ISS_[FM]', []), NOW).label).toBe('Schedule-dependent (unconfirmed)');
+  it('an activation-required repeater is labelled as needing a confirmed activation window, whatever the reports say', () => {
+    const act = { amsatStatusKey: 'IO-86_[FM]', interruptible: false, activationRequired: true };
+    for (const reports of [[], [[hoursAgo(1), 'H', 0]], [[hoursAgo(1), 'N', 0]]] as StatusFile['satellites'][string]['reports'][]) {
+      const s = classifyStatus(act, file('IO-86_[FM]', reports), NOW);
+      expect(s.state).toBe('activation-required');
+      expect(s.label).toBe('Activation window required (not confirmed)');
+      expect(s.countsTowardMinimum).toBe(false);
+    }
   });
 });

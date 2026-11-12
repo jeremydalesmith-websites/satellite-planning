@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { consideredIds, evaluateEligibility } from '../eligibility/eligibility.ts';
 import { loadData } from '../data/load.ts';
 import type { LoadResult } from '../data/load.ts';
 import { predictInWorker } from '../orbit/client.ts';
@@ -27,7 +28,14 @@ export function App() {
   const [events, setEvents] = useState<SavedEvent[]>(() => loadEvents());
   const [storageWarn, setStorageWarn] = useState(false);
   const handle = useRef<PredictHandle | null>(null);
-  const [nowMs] = useState(() => Date.now());
+  // Current-time snapshot for the picker and the Saved tab. Taken again every time a tab is opened,
+  // so reopening saved events re-evaluates eligibility against the time NOW, not page-load time.
+  // (A search takes its own single snapshot inside runSearch.)
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const openTab = (t: Tab) => {
+    setNowMs(Date.now());
+    setTab(t);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -39,21 +47,30 @@ export function App() {
   }, []);
 
   const data = load?.ok ? load.data : null;
+  const eligibility = useMemo(() => (data ? evaluateEligibility(data.status, nowMs) : null), [data, nowMs]);
 
   const runSearch = useCallback(
     async (inputs: PlanInputs) => {
       if (!data) return;
       handle.current?.cancel();
-      const now = Date.now();
+      const now = Date.now(); // the ONE time snapshot for this whole search
       const { usable, skipped } = usableElements(data.elements, now);
       if (usable.length === 0) {
         setSearch({ state: 'error', message: 'No satellite has orbital data recent enough to predict from. Nothing was calculated.' });
         return;
       }
-      setSearch({ state: 'running', done: 0, total: usable.length, name: '' });
+      // Only satellites that are eligible now AND selected are predicted at all.
+      const considered = consideredIds(evaluateEligibility(data.status, now), inputs.selectedNoradIds);
+      const toPredict = usable.filter((s) => considered.has(s.noradId));
+      if (toPredict.length === 0) {
+        setSearch({ state: 'done', inputs, result: computePlan(inputs, data, [], [], skipped, now, now), nowMs: now });
+        setTimeout(() => document.getElementById('results-title')?.focus(), 50);
+        return;
+      }
+      setSearch({ state: 'running', done: 0, total: toPredict.length, name: '' });
       const h = predictInWorker(
         {
-          elements: usable,
+          elements: toPredict,
           observer: inputs.observer,
           startMs: inputs.range.start,
           endMs: inputs.range.end,
@@ -64,7 +81,7 @@ export function App() {
       handle.current = h;
       try {
         const run = await h.promise;
-        const result = computePlan(inputs, data, run.passes, run.errors, skipped, now, run.generatedAtMs);
+        const result = computePlan(inputs, data, run.passes, run.errors, skipped, now, now);
         setSearch({ state: 'done', inputs, result, nowMs: now });
         setTimeout(() => document.getElementById('results-title')?.focus(), 50);
       } catch (e) {
@@ -104,8 +121,8 @@ export function App() {
       <header className="top">
         <h1>FM Satellite Event Planner</h1>
         <nav aria-label="Sections">
-          <button type="button" className={tab === 'plan' ? 'tab on' : 'tab'} aria-current={tab === 'plan' ? 'page' : undefined} onClick={() => setTab('plan')}>Plan</button>
-          <button type="button" className={tab === 'saved' ? 'tab on' : 'tab'} aria-current={tab === 'saved' ? 'page' : undefined} onClick={() => setTab('saved')}>
+          <button type="button" className={tab === 'plan' ? 'tab on' : 'tab'} aria-current={tab === 'plan' ? 'page' : undefined} onClick={() => openTab('plan')}>Plan</button>
+          <button type="button" className={tab === 'saved' ? 'tab on' : 'tab'} aria-current={tab === 'saved' ? 'page' : undefined} onClick={() => openTab('saved')}>
             Saved events{events.length ? ` (${events.length})` : ''}
           </button>
         </nav>
@@ -125,7 +142,7 @@ export function App() {
 
         {tab === 'plan' && (
           <>
-            <PlanForm busy={search.state === 'running' || !data} onSearch={runSearch} />
+            <PlanForm busy={search.state === 'running' || !data} onSearch={runSearch} eligibility={eligibility} />
             {search.state === 'running' && (
               <p className="card progress" role="status" aria-live="polite">
                 Calculating passes… {search.done} of {search.total}{search.name ? ` (${search.name})` : ''}
@@ -155,7 +172,7 @@ export function App() {
           <summary>About this planner, data sources and limits</summary>
           <ul>
             <li>Orbits are calculated in your browser with SGP4 (satellite.js) from public orbital elements published by <a href={SOURCES.amsatTle.url}>AMSAT</a>.</li>
-            <li>Repeater activity comes from volunteer reports on the <a href={SOURCES.amsatStatus.url}>AMSAT status page</a> (reports licensed CC BY 4.0). A heard beacon does not mean the repeater works, so those reports are not counted.</li>
+            <li>Repeater activity comes from volunteer reports on the <a href={SOURCES.amsatStatus.url}>AMSAT status page</a> (reports licensed CC BY 4.0). A satellite is considered only with a “heard” report for its FM repeater in the last 72 hours; a heard beacon does not count. Searching re-checks existing reports against the current time and does not download new ones.</li>
             <li>Frequencies and operating notes were copied by hand from <a href={SOURCES.amsatFm.url}>AMSAT’s FM satellite page</a>; they are not live and may be out of date.</li>
             <li>Predictions weeks ahead are estimates, not second-accurate. Re-check close to the event; saved events do this for you when opened.</li>
             <li>Only FM voice repeaters on 2 m / 70 cm are planned. No live tracking, Doppler, SSTV, or linear transponders in this version.</li>

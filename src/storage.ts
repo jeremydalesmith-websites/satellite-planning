@@ -15,6 +15,12 @@ export interface Prefs {
   durationMin: number;
   minOpportunitiesText: string;
   availability: AvailabilitySettings;
+  /**
+   * The user's explicit satellite selection (NORAD IDs), stored exactly as chosen. Eligibility never
+   * edits it: a satellite that is temporarily ineligible stays selected, and one the user unchecked
+   * stays unchecked. Absent = the user has not chosen yet, so the defaults apply.
+   */
+  selectedIds?: number[];
 }
 
 function read(key: string): unknown {
@@ -57,6 +63,7 @@ export function loadPrefs(): Partial<Prefs> {
   if (typeof p.minElevationText === 'string') out.minElevationText = p.minElevationText;
   if (typeof p.durationMin === 'number') out.durationMin = p.durationMin;
   if (typeof p.minOpportunitiesText === 'string') out.minOpportunitiesText = p.minOpportunitiesText;
+  if (Array.isArray(p.selectedIds) && p.selectedIds.every((n) => Number.isInteger(n))) out.selectedIds = p.selectedIds;
   out.availability = validAvailability(p.availability) ? p.availability : emptyAvailability();
   return out;
 }

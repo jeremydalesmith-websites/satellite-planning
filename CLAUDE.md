@@ -26,15 +26,30 @@ in frontend code. Use `satellite.js` for orbital mechanics; do not hand-roll it.
 * **Never fabricate or substitute data.** Missing orbital data = a visible
   "Data unavailable" state. Test fixtures (`tests/fixtures/`) are real but
   frozen and must stay clearly labelled; they are never used by the app.
-* **Operational-status policy is deliberately strict** (`src/domain/policy.ts`,
-  `src/eligibility/status.ts`). Only "recently reported active" counts toward an
-  event's minimum. Unknown, stale, mixed-report and unconfirmed
-  schedule-dependent repeaters are *conditional* (shown, not counted). A heard
-  beacon never establishes repeater use. **Do not loosen this to produce more
-  windows.** If a change is proposed, first explain the rules and which
-  satellites/opportunities they exclude, then wait for approval.
+* **Operational eligibility is deliberately strict** (`src/domain/policy.ts`,
+  `src/eligibility/status.ts`, `src/eligibility/eligibility.ts`). A satellite is considered
+  only with a "Heard" report for its exact `_[FM]` entry in the rolling last 72 hours
+  (measured from the time of the search or saved-event re-check, one time snapshot each),
+  with no newer negative. Unknown, stale, mixed-report, unconfirmed and
+  status-data-unavailable repeaters are **excluded entirely**: never in timelines, pass
+  cards, counts or ranking; only listed with a reason in the collapsed diagnostic area,
+  worded as missing evidence (never "inactive"). There is no conditional tier and no
+  "show unconfirmed" option. A heard beacon never establishes repeater use. A recent
+  report is necessary, not sufficient: sunlight still applies, and the catalog classifies each repeater's
+  operating pattern from its own cited source. `interruptible` (ISS, per ARISS: normally full-time, sometimes
+  switched off) qualifies on recent evidence. `activation-required` (scheduled, experimental or commanded
+  activation: CAS-3H, IO-86, PO-101, RS95S) never qualifies from reports alone and is excluded until an
+  activation-confirmation source exists. Do not describe the ISS repeater as available only when astronauts
+  operate it. Classify any new satellite individually; when unsure, use `activation-required`.
+  **Do not loosen this to produce more windows.** If a change is proposed, first explain
+  the rules and which satellites/opportunities they exclude, then wait for approval.
+* The user's satellite selection is stored exactly as chosen and is never edited by
+  eligibility (a temporarily ineligible satellite stays selected; unchecked ones are
+  never re-selected). Defaults: ISS, SO-50, AO-91 when eligible.
+* Searching and re-checking saved events re-evaluate eligibility against existing
+  reports; they never download new ones. Do not word the UI as if a refresh happened.
 * Never silently lower the elevation threshold, add availability hours, or count
-  conditional passes. Empty results explain themselves and only *suggest*.
+  unconfirmed satellites. Empty results explain themselves and only *suggest*.
 * Sunlight means sunlight **at the satellite**, never local daylight.
 * A pass counts only if its whole operating interval fits inside the event;
   overlapping passes are shown as alternatives (one operating station).

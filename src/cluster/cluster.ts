@@ -96,11 +96,12 @@ export interface WindowEvaluation {
   counted: PassAssessment[];
   /** Eligible passes inside the window that overlap a counted pass (not counted). */
   alternatives: PassAssessment[];
-  /** Passes that would qualify but whose operating status is unconfirmed (never counted). */
-  conditional: PassAssessment[];
-  /** Eligible/conditional passes whose operating interval crosses the window edge (not counted). */
+  /** Eligible passes whose operating interval crosses the window edge (not counted). */
   edge: PassAssessment[];
-  /** Passes in the window excluded for eclipse or reported not working. */
+  /**
+   * Passes of eligible satellites excluded for eclipse. Passes of satellites lacking a qualifying
+   * recent FM report (exclusion 'status') are dropped here and never appear in any list or count.
+   */
   excluded: PassAssessment[];
   totalOperatingMs: number;
   distinctSatellites: number;
@@ -110,18 +111,17 @@ export interface WindowEvaluation {
 /** Evaluate one fixed window. Used both for searching and for re-checking saved events. */
 export function evaluateWindow(window: Interval, all: readonly PassAssessment[]): WindowEvaluation {
   const inside: PassAssessment[] = [];
-  const conditional: PassAssessment[] = [];
   const edge: PassAssessment[] = [];
   const excluded: PassAssessment[] = [];
   for (const a of all) {
     if (a.riseMs >= window.end || a.setMs <= window.start) continue; // pass does not touch the window
     if (a.verdict === 'excluded') {
-      if (a.exclusion !== 'below-threshold') excluded.push(a);
+      if (a.exclusion === 'eclipse') excluded.push(a); // 'status' and 'below-threshold' are never shown
       continue;
     }
     if (!a.operating) continue;
     if (contains(window, a.operating)) {
-      (a.verdict === 'eligible' ? inside : conditional).push(a);
+      inside.push(a);
     } else if (overlaps(window, a.operating)) {
       edge.push(a);
     }
@@ -134,7 +134,6 @@ export function evaluateWindow(window: Interval, all: readonly PassAssessment[])
     window,
     counted,
     alternatives: alternatives.sort(byStart),
-    conditional: conditional.sort(byStart),
     edge: edge.sort((x, y) => x.riseMs - y.riseMs),
     excluded: excluded.sort((x, y) => x.riseMs - y.riseMs),
     totalOperatingMs: counted.reduce((s, c) => s + duration(c.operating!), 0),

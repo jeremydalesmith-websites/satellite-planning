@@ -27,7 +27,9 @@ export function SavedEvents({ events, data, nowMs, onDelete }: Props) {
   return (
     <section aria-labelledby="saved-title">
       <h2 id="saved-title">Saved events</h2>
-      <p className="hint">Each event keeps its saved date and time. Opening this page re-checks it against the latest orbital and status data and tells you what changed.</p>
+      <p className="hint">
+        Each event keeps its saved date and time. Opening this page re-checks the 72-hour eligibility rule against the current time ({fmtDateTime(nowMs, events[0]!.timeZone)}) using the status reports already downloaded; it does not download new reports.
+      </p>
       {sorted.map((ev) => <SavedCard key={ev.id} ev={ev} data={data} nowMs={nowMs} onDelete={() => onDelete(ev.id)} />)}
     </section>
   );
@@ -69,10 +71,20 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
       {out.ok && !out.passed && out.recheck.meetsMinimum && out.recheck.changes.length === 0 && (
         <p className="ok-box">No meaningful changes since you saved it.</p>
       )}
-      {out.ok && out.recheck.changes.length > 0 && (
+      {out.ok && out.recheck.lostEligibility.length > 0 && (
+        <div className="alert-box" role="alert">
+          <h4>Eligibility changed</h4>
+          <ul>
+            {out.recheck.lostEligibility.map((l, i) => (
+              <li key={i}>{l.name} (peak {fmtTime(l.peakMs, tz)}): {l.reason}. It no longer counts; the saved date and time have not moved.</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {out.ok && out.recheck.changes.some((x) => x.kind !== 'eligibility') && (
         <div className="changes">
           <h4>What changed</h4>
-          <ul>{out.recheck.changes.map((x, i) => <li key={i} className={x.kind}>{x.text}</li>)}</ul>
+          <ul>{out.recheck.changes.filter((x) => x.kind !== 'eligibility').map((x, i) => <li key={i} className={x.kind}>{x.text}</li>)}</ul>
         </div>
       )}
 
@@ -81,27 +93,17 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
           <Timeline
             window={ev.window}
             tz={tz}
-            items={[
-              ...out.recheck.evaluation.counted.map((pass) => ({ pass, kind: 'counted' as const })),
-              ...out.recheck.evaluation.alternatives.map((pass) => ({ pass, kind: 'alternative' as const })),
-              ...out.recheck.evaluation.conditional.map((pass) => ({ pass, kind: 'conditional' as const })),
-            ]}
+            items={out.recheck.evaluation.counted.map((pass) => ({ pass, kind: 'counted' as const }))}
           />
           <h4 className="group">Counted now</h4>
           {out.recheck.evaluation.counted.length === 0 && <p>None.</p>}
           {out.recheck.evaluation.counted.map((p) => (
-            <PassCard key={p.passId} pass={p} role="counted" tz={tz} statusDownloadedAt={data?.status?.downloadedAt ?? null} />
+            <PassCard key={p.passId} pass={p} role="counted" tz={tz} statusDownloadedAt={out.statusDownloadedAt} />
           ))}
-          {out.recheck.evaluation.conditional.length > 0 && (
-            <details>
-              <summary>{out.recheck.evaluation.conditional.length} conditional (status unconfirmed)</summary>
-              {out.recheck.evaluation.conditional.map((p) => <PassCard key={p.passId} pass={p} role="conditional" tz={tz} statusDownloadedAt={data?.status?.downloadedAt ?? null} />)}
-            </details>
-          )}
         </>
       ) : (
         <>
-          <h4 className="group">As saved</h4>
+          <h4 className="group">As saved (eligibility not re-confirmed)</h4>
           <ul>
             {ev.original.counted.map((o, i) => (
               <li key={i}>{o.name}: peak {fmtTime(o.peakMs, tz)}, {o.fullMaxElevationDeg.toFixed(0)}° ({ACTIVITIES.find((a) => a.noradId === o.noradId)?.bandConfig ?? ''})</li>

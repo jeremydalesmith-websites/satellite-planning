@@ -61,7 +61,10 @@ describe('stale / unavailable data', () => {
     );
     expect(plan.assessments.some((a) => a.verdict === 'eligible')).toBe(false);
     expect(plan.windows).toEqual([]);
-    expect(plan.diagnosis!.conditionalPasses).toBeGreaterThan(0);
+    expect(plan.consideredNoradIds).toEqual([]);
+    expect(plan.assessments).toEqual([]);
+    expect(plan.eligibility.every((e) => !e.eligible)).toBe(true);
+    expect(plan.eligibility.filter((e) => !e.status.activationRequired).every((e) => /status data unavailable/.test(e.reason ?? ''))).toBe(true);
     expect(plan.meta.statusDownloadedAt).toBeNull();
   });
   it('with the real status fixture the finder matches a brute-force minute-by-minute reference', () => {
@@ -126,7 +129,7 @@ describe('local night vs satellite sunlight (real orbit, ISS)', () => {
   it('for a sunlight-dependent repeater, eligibility follows satellite sunlight, not local time', () => {
     // Apply the AO-91 rule to ISS geometry: lit-in-darkness passes stay eligible, eclipsed ones do not.
     const ao91 = ACTIVITIES.find((a) => a.name === 'AO-91')!;
-    const st = classifyStatus({ amsatStatusKey: ao91.amsatStatusKey, scheduleDependent: false }, { schema: 1, source: { name: '', url: '', license: '' }, downloadedAt: '', satellites: { [ao91.amsatStatusKey]: { reports: [[Math.floor(FIXTURE_DOWNLOAD_MS / 1000) - 60, 'H', 0]] } } }, FIXTURE_DOWNLOAD_MS);
+    const st = classifyStatus({ amsatStatusKey: ao91.amsatStatusKey, interruptible: false, activationRequired: false }, { schema: 1, source: { name: '', url: '', license: '' }, downloadedAt: '', satellites: { [ao91.amsatStatusKey]: { reports: [[Math.floor(FIXTURE_DOWNLOAD_MS / 1000) - 60, 'H', 0]] } } }, FIXTURE_DOWNLOAD_MS);
     const withThr = findPasses(el(25544), TEST_OBSERVER, FIXTURE_DOWNLOAD_MS, FIXTURE_DOWNLOAD_MS + 30 * DAY, { thresholdsDeg: [30] });
     const dark = withThr.filter((p) => localSunElevationDeg(p.peakMs) < -12);
     const litDark = dark.find((p) => p.sunSegments.every((s) => s.lit))!;

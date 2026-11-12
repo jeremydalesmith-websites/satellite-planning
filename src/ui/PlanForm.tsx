@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { addDays, localDate } from '../availability/availability.ts';
 import { EVENT_DURATIONS_MIN, MAX_SEARCH_DAYS, DEFAULT_MIN_ELEVATION_DEG, DEFAULT_MIN_OPPORTUNITIES, DEFAULT_SEARCH_DAYS } from '../domain/policy.ts';
 import { loadPrefs, savePrefs } from '../storage.ts';
+import { DEFAULT_SELECTED_NORAD_IDS } from '../eligibility/eligibility.ts';
+import type { SatelliteEligibility } from '../eligibility/eligibility.ts';
 import { AvailabilityGrid } from './AvailabilityGrid.tsx';
+import { SatellitePicker } from './SatellitePicker.tsx';
 import { validateForm } from './validate.ts';
 import type { FieldKey, FormErrors, FormFields } from './validate.ts';
 import type { PlanInputs } from '../planner.ts';
@@ -44,10 +47,16 @@ function initialFields(): FormFields {
 interface Props {
   busy: boolean;
   onSearch: (inputs: PlanInputs) => void;
+  /** Eligibility of each catalog repeater (evaluated by the app); null/undefined = not loaded. */
+  eligibility?: SatelliteEligibility[] | null;
 }
 
-export function PlanForm({ busy, onSearch }: Props) {
+export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
   const [f, setF] = useState<FormFields>(initialFields);
+  // The user's explicit choice, stored as chosen. null = never chosen, so the defaults apply.
+  const [chosen, setChosen] = useState<number[] | null>(() => loadPrefs().selectedIds ?? null);
+  const selected: readonly number[] = chosen ?? DEFAULT_SELECTED_NORAD_IDS;
+  const toggle = (id: number) => setChosen(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
   const [submitted, setSubmitted] = useState(false);
   const [geoMsg, setGeoMsg] = useState<string | null>(null);
   const zones = useMemo(zoneList, []);
@@ -62,8 +71,9 @@ export function PlanForm({ busy, onSearch }: Props) {
       durationMin: f.durationMin,
       minOpportunitiesText: f.minOpportunitiesText,
       availability: f.availability,
+      ...(chosen ? { selectedIds: chosen } : {}),
     });
-  }, [f.latText, f.lonText, f.timeZone, f.minElevationText, f.durationMin, f.minOpportunitiesText, f.availability]);
+  }, [f.latText, f.lonText, f.timeZone, f.minElevationText, f.durationMin, f.minOpportunitiesText, f.availability, chosen]);
 
   const set = <K extends keyof FormFields>(k: K, v: FormFields[K]) => setF((p) => ({ ...p, [k]: v }));
   const { inputs, errors } = useMemo(() => validateForm(f, Date.now()), [f]);
@@ -72,7 +82,7 @@ export function PlanForm({ busy, onSearch }: Props) {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
-    if (inputs) onSearch(inputs);
+    if (inputs) onSearch({ ...inputs, selectedNoradIds: selected });
   };
 
   const locate = () => {
@@ -181,6 +191,8 @@ export function PlanForm({ busy, onSearch }: Props) {
           ))}
         </div>
       </fieldset>
+
+      <SatellitePicker eligibility={eligibility} selected={selected} onToggle={toggle} tz={f.timeZone} />
 
       <AvailabilityGrid
         value={f.availability}

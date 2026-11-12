@@ -32,6 +32,14 @@ export const SOURCES = {
     label: 'AMSAT orbital elements (nasabare.txt)',
     url: 'https://www.amsat.org/tle/current/nasabare.txt',
   },
+  arissStatus: {
+    label: 'ARISS: Current Status of ISS Stations (page dated Nov 4, 2026)',
+    url: 'https://www.ariss.org/current-status-of-iss-stations.html',
+  },
+  arrlIssRepeater: {
+    label: 'ARRL: Simultaneous APRS and Voice Repeater on the ISS (reporting the ARISS announcement, 2022)',
+    url: 'http://www.arrl.org/news/view/simultaneous-aprs-and-voice-repeater-on-the-international-space-station',
+  },
 } as const satisfies Record<string, SourceRef>;
 
 /** Date a person last compared this file with the sources above (ISO date). */
@@ -127,22 +135,42 @@ export const FM_REPEATERS: readonly FmRepeaterConfig[] = [
 
 /* ------------------------------------------------------------------ 3 */
 
+/**
+ * Operating-pattern classifications. These are DIFFERENT and are reviewed per satellite from its own
+ * cited source text (never inferred from one shared flag):
+ *
+ *   interruptible        Normally operating (expected on full time), but subject to interruptions by
+ *                        operations on its platform. A recent positive FM report is sufficient evidence,
+ *                        like any other normally operating repeater. A badge and a note are shown.
+ *   activation-required  Operates only when separately activated: on a schedule, during testing, or when
+ *                        commanded. A recent report does NOT show it will be on for a predicted pass.
+ *                        It qualifies only with confirmation covering that pass. No schedule importer
+ *                        exists yet, so such a confirmation is never available and these satellites are
+ *                        conservatively excluded from planning (and explained in the diagnostics).
+ *   sunlight-only        Must not be used in eclipse. Independent of both of the above and always enforced.
+ */
 export type RestrictionKind =
   /** Repeater must not be used while the satellite is in Earth's shadow. Affects eligibility. */
   | 'sunlight-only'
-  /** Repeater is only on at some times (schedule, crew, testing). Affects eligibility via status. */
-  | 'schedule-dependent'
+  /** Normally operating, but subject to interruptions. Shown as a badge; does not gate eligibility. */
+  | 'interruptible'
+  /** Needs a scheduled/experimental/commanded activation window. Excluded without confirmation covering the pass. */
+  | 'activation-required'
   /** Information only: shown to the user, does not change eligibility. */
   | 'note';
 
 export interface Restriction {
   noradId: number;
   kind: RestrictionKind;
-  /** Plain-language text shown in the UI. */
+  /** Plain-language text shown in the UI (in Details). */
   text: string;
   source: SourceRef;
+  /** Further sources for the same text. */
+  moreSources?: SourceRef[];
   /** ISO date of the source text. A manual entry, NOT live verification. */
   asOf: string;
+  /** Short badge for 'interruptible' restrictions, shown on pass cards. */
+  badge?: string;
 }
 
 const A = (noradId: number, kind: RestrictionKind, text: string): Restriction => ({
@@ -155,12 +183,25 @@ const A = (noradId: number, kind: RestrictionKind, text: string): Restriction =>
 
 export const RESTRICTIONS: readonly Restriction[] = [
   A(43017, 'sunlight-only', 'AMSAT asks that this repeater not be used while the satellite is in eclipse (battery condition).'),
-  A(25544, 'schedule-dependent', 'The ISS FM repeater is switched on by the crew only at times; there is no fixed schedule.'),
-  A(40908, 'schedule-dependent', 'The FM repeater has no set schedule; when it is off, only a telemetry beacon is heard on the downlink.'),
-  A(40931, 'schedule-dependent', 'AMSAT lists this repeater as operating on a schedule.'),
+  {
+    noradId: 25544,
+    kind: 'interruptible',
+    badge: 'Subject to ISS operations',
+    text:
+      'ARISS expects the ISS radios to operate full time, except during educational contacts, spacewalks (EVAs), dockings and undockings. ' +
+      'ARISS’s status page adds that the radios are sometimes turned off for vehicle, spacewalk and payload activities, and that times are subject to change. ' +
+      'A recent report is the evidence of operation used here; an interruption at the event is still possible.',
+    source: SOURCES.arissStatus,
+    moreSources: [SOURCES.arrlIssRepeater],
+    asOf: '2026-11-04',
+  },
+  // CAS-3H: AMSAT gives no schedule, and says only a beacon is heard while the repeater is off. No published
+  // activation window exists to confirm against, so it is classified conservatively as activation-required.
+  A(40908, 'activation-required', 'AMSAT: the FM repeater has no set schedule; when it is off, only a telemetry beacon is heard on the downlink. No activation window is published, so none can be confirmed.'),
+  A(40931, 'activation-required', 'AMSAT lists this repeater as operating on a schedule.'),
   A(40931, 'note', 'Low-inclination orbit (about 6° in the downloaded elements): high passes are only possible for observers near the equator.'),
-  A(43678, 'schedule-dependent', 'FM repeater is activated by schedule. AMSAT also notes the satellite may be failing.'),
-  A(67291, 'schedule-dependent', 'AMSAT lists the repeater as "on during testing"; watch AMSAT-BB for announcements.'),
+  A(43678, 'activation-required', 'AMSAT: the FM repeater is activated by schedule. AMSAT also notes the satellite may be failing.'),
+  A(67291, 'activation-required', 'AMSAT lists the repeater as "on during testing"; watch AMSAT-BB for announcements.'),
   A(27607, 'note', 'The repeater has a 10-minute timer that must be armed before use: send a 2-second carrier with a 74.4 Hz CTCSS tone.'),
   ...[63217, 63219, 63218, 63213, 63214, 63215, 63238, 63239, 63237].map((id) =>
     A(id, 'note', 'The owner reports software issues (random restarts that shut off the repeater, possible audio distortion), so operation is unreliable.'),
@@ -180,7 +221,12 @@ export interface FmActivity {
   bandConfig: BandConfig;
   amsatStatusKey: string;
   sunlightRequired: boolean;
-  scheduleDependent: boolean;
+  /** Normally operating but subject to interruptions (ISS). Does not gate eligibility. */
+  interruptible: boolean;
+  /** Short badge for the interruptible classification, if any. */
+  interruptibleBadge: string | null;
+  /** Needs a scheduled/experimental/commanded activation window; excluded without confirmation covering the pass. */
+  activationRequired: boolean;
   restrictions: Restriction[];
   sources: SourceRef[];
 }
@@ -221,7 +267,9 @@ export function joinActivities(
       bandConfig: bandConfigOf(r.uplink.mhz, r.downlink.mhz),
       amsatStatusKey: r.amsatStatusKey,
       sunlightRequired: rs.some((x) => x.kind === 'sunlight-only'),
-      scheduleDependent: rs.some((x) => x.kind === 'schedule-dependent'),
+      interruptible: rs.some((x) => x.kind === 'interruptible'),
+      interruptibleBadge: rs.find((x) => x.kind === 'interruptible')?.badge ?? null,
+      activationRequired: rs.some((x) => x.kind === 'activation-required'),
       restrictions: rs,
       sources: r.sources,
     });
@@ -230,6 +278,13 @@ export function joinActivities(
 }
 
 export const ACTIVITIES: readonly FmActivity[] = joinActivities();
+
+/** Compact band direction for cards, e.g. "↑ 2 m · ↓ 70 cm" (you transmit up, listen down). */
+export function compactBands(a: Pick<FmActivity, 'bandConfig'>): string {
+  const label = (b: 'V' | 'U') => (b === 'V' ? '2 m' : '70 cm');
+  const [up, down] = a.bandConfig.split('/') as ['V' | 'U', 'V' | 'U'];
+  return `↑ ${label(up)} · ↓ ${label(down)}`;
+}
 
 /** Plain-language band wording for the UI. */
 export function describeBands(a: Pick<FmActivity, 'bandConfig' | 'uplink' | 'downlink'>): string {

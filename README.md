@@ -55,7 +55,7 @@ the stated limitation or only partial automated coverage; **Not yet** = delibera
 | 9 | Cluster finder: non-overlapping count, fit-inside rule, consolidation, ranking, honest empty results | Done | `cluster`, `planner` (vs minute-by-minute reference) | Conservative single-station rule; touching passes count as sequential with no setup gap |
 | 10 | Event cards and pass cards with all required fields | Done* | browser check, screenshots | `EventCard`, `PassCard` and the timeline have no component tests; the timeline is decorative (`aria-hidden`) with the same information in text |
 | 11 | Saved events stay fixed; recomputed; changes and minimum warning | Done* | `saved` | Re-checked when the Saved tab is opened (not on app load); local to one browser |
-| 12 | Separate testable modules; required test list; independent validation | Done* | 152 tests; `docs/VALIDATION.md` | Skyfield validation needs Python and is not in `npm test`; it checks the implementation, not real-world accuracy |
+| 12 | Separate testable modules; required test list; independent validation | Done* | 180 tests; `docs/VALIDATION.md` | Skyfield validation needs Python and is not in `npm test`; it checks the implementation, not real-world accuracy |
 | 13 | README (dev, test, deploy, data, catalog, limits, deferred) | Done | this file | |
 
 ## Local development
@@ -92,7 +92,7 @@ Other scripts: `npm run typecheck`, `npm run build`, `npm run preview`,
 npm test
 ```
 
-152 tests, no network needed. They use **clearly labelled fixtures**: real AMSAT
+180 tests, no network needed. They use **clearly labelled fixtures**: real AMSAT
 elements and status reports frozen on 2026-11-12 in `tests/fixtures/`, plus
 synthetic geometry in `tests/factory.ts` where an exact boundary is needed.
 They cover elevation-threshold boundaries; partial eclipse and local-night vs
@@ -218,12 +218,40 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
   Windows with the same set of passes are consolidated into one tidy
   (15-minute-aligned) start; windows overlapping a better one by ≥50% are
   folded into it ("N nearly identical windows folded").
-* **Status gating.** Only repeaters *recently reported active* count toward
-  your minimum. Everything else is either **conditional** (shown, not counted) or
-  **excluded**; see the vocabulary and matching rules below.
+* **Strict eligibility.** A satellite is considered **only** if its exact FM repeater entry has a
+  "Heard" report in the rolling last 72 hours, measured back from the time of the search (or of the
+  saved-event re-check), with no newer negative report. A satellite without that evidence is left
+  out of planning entirely: never in timelines, pass cards, counts or ranking. It is listed, with
+  the reason, in a collapsed "Satellites not considered" area under the results. Being left out means
+  *this planner lacks the required evidence*, not that the satellite is inactive. There is no
+  "conditional" or "unconfirmed" tier and no option to show unconfirmed passes.
+* **Necessary, not sufficient.** A recent report never overrides the catalog's operating-pattern
+  classification (reviewed per satellite from its cited source) or sunlight:
+  * *Interruptible* (ISS): normally operating, subject to interruptions. ARISS expects the ISS radios to
+    run full time except during educational contacts, spacewalks, dockings and undockings. It qualifies on a
+    recent positive FM report like any normally operating repeater, with no per-pass activation
+    announcement; the pass card shows a "Subject to ISS operations" badge and the explanation and ARISS
+    sources are under Details.
+  * *Activation required* (CAS-3H, IO-86, PO-101, RS95S): scheduled, experimental ("on during testing") or
+    otherwise separately activated, so a recent report does not show it will be on for a predicted pass.
+    Such a satellite would qualify only with confirmation covering that pass. No schedule importer exists
+    yet, so none can be confirmed and they are excluded, with the reason, in the diagnostic list.
+    (CAS-3H is the judgment call: AMSAT gives it "no set schedule" and no published window, so it is
+    classified conservatively here.)
+  * *Sunlight-only* (AO-91): independent of both; an eclipsed part of a pass is never used.
+  The rule shows evidence of operation *now*, not that the repeater will operate at an event weeks ahead.
+* **Selection.** You choose which eligible satellites to consider. ISS, SO-50 and AO-91 start
+  selected; any other eligible repeater starts unchecked. An unselected satellite never appears in or
+  affects results. Your choice is stored exactly as you made it (in this browser): a satellite that is
+  temporarily ineligible stays selected and returns by itself when it qualifies again, and one you
+  unchecked is never re-selected for you.
+* **Checking vs downloading.** Searching or opening saved events *re-checks the existing reports
+  against the current time* (one time snapshot per search or re-check). It does **not** download new
+  reports; the page shows when the reports were downloaded (by `npm run refresh-data` / `npm start`) and
+  when eligibility was checked.
 * **No results?** The page explains why and suggests what could be relaxed
-  (fewer opportunities, lower elevation, longer event, more availability,
-  counting conditionals). Nothing is ever relaxed automatically.
+  (fewer opportunities, lower elevation, longer event, more availability). Nothing is ever relaxed
+  automatically, and unconfirmed satellites are never suggested as a way to get more windows.
 
 ### How AMSAT reports are matched to the FM repeater
 
@@ -259,16 +287,20 @@ report under the correct mode.
 
 ### What each result label means (status vocabulary)
 
-| Label shown | When | Counts toward your minimum? | Shown as |
-|---|---|---|---|
-| **Recently reported active** | at least one "Heard" in the last 72 h and no newer negative | **Yes** | counted pass |
-| **Mixed reports** | "Heard" reports **and** a newer negative (not heard / beacon only) | No | conditional |
-| **Not heard (unconfirmed)** | negative report(s) only, but fewer than 2 reports or fewer than 2 operators | No | conditional |
-| **Confirmed unavailable** | at least 2 negative reports from at least 2 operators, no "Heard", all in the last 72 h | No | excluded, with the reason |
-| **No recent reports** / **Schedule-dependent (unconfirmed)** | no reports in 72 h (the latter if AMSAT says the repeater runs on a schedule, crew or test basis) | No | conditional |
-| **Status data unavailable** | the status file could not be loaded | No | conditional |
+| Label (diagnostic detail) | When | Eligible for planning? |
+|---|---|---|
+| **Recently reported active** | at least one "Heard" in the last 72 h and no newer negative | **Yes** (if selected) |
+| **Mixed reports** | "Heard" reports **and** a newer negative (not heard / beacon only) | No: left out |
+| **Not heard (unconfirmed)** | negative report(s) only, but fewer than 2 reports or fewer than 2 operators | No: left out |
+| **Confirmed unavailable** | at least 2 negative reports from at least 2 operators, no "Heard", all in the last 72 h | No: left out |
+| **No recent reports** | no reports in 72 h | No: left out |
+| **Activation window required (not confirmed)** | catalog classification `activation-required`, whatever the reports say | No: left out (until a confirmation source exists) |
+| **Status data unavailable** | the status file could not be loaded | No: left out ("eligibility cannot be established") |
 
-"Confirmed" here means *repeatedly reported by several operators*, not verified by AMSAT.
+The classification is unchanged; only its consequence is. Every row except the first is left out
+of planning and shown only in the collapsed diagnostic list, worded as missing evidence, for example
+"TEVEL2-1: no qualifying FM report in the last 72 hours." "Confirmed" here means *repeatedly reported by
+several operators*, not verified by AMSAT.
 
 ## Policies (tunable assumptions)
 
@@ -277,9 +309,10 @@ owners. All live in `src/domain/policy.ts`.
 
 | Policy | Value | Effect |
 |---|---|---|
-| Status freshness window | 72 h | Only reports within it can confirm activity |
-| "Confirmed unavailable" | ≥2 negative reports from ≥2 operators, no positive | Excluded (one negative = just "not heard (unconfirmed)") |
-| "Mixed reports" | newest report negative after a positive | Not counted (conditional) |
+| Status freshness window | 72 h, back from the time of the search | Only reports within it can make a satellite eligible |
+| "Confirmed unavailable" | ≥2 negative reports from ≥2 operators, no positive | Left out (one negative = just "not heard (unconfirmed)", also left out) |
+| "Mixed reports" | newest report negative after a positive | Left out |
+| Default selection | ISS, SO-50, AO-91 (when eligible) | Other eligible satellites start unchecked |
 | Orbital-elements age limit | 30 days | Older sets are skipped and named in the results |
 | Prediction labels | >7 d "tentative", >28 d "provisional" (days past elements epoch) | Wording only, not an accuracy figure |
 | Shadow rule | shadow fraction ≥ 0.01 = not sunlit | Conservative for eclipse-restricted repeaters |
@@ -287,18 +320,17 @@ owners. All live in `src/domain/policy.ts`.
 | Search span | ≤ 42 days | |
 
 A consequence worth knowing: the status policy is deliberately strict. Few
-repeaters are *confirmed active at any moment*, so with ≥3 opportunities
-required you may see conditional-only or empty results. Relaxing to 2, or
-reading the conditional list, is a decision left to you. Status is also a
-snapshot of *now*; for an event weeks away it is the best available evidence,
-not a promise.
+repeaters have a recent "Heard" report at any moment, so with ≥3 opportunities
+required you may see empty results. Relaxing to 2 is a decision left to you; the
+planner never counts unconfirmed satellites. Status is also a snapshot of *now*; for an
+event weeks away it is the best available evidence, not a promise.
 
 ## Catalog maintenance
 
 `src/catalog/catalog.ts` has three separate layers:
 `SATELLITES` (identity by stable NORAD ID), `FM_REPEATERS` (frequencies, CTCSS
-tones, AMSAT status key) and `RESTRICTIONS` (sunlight-only / schedule-dependent
-/ notes, each with source and date). To add a satellite:
+tones, AMSAT status key) and `RESTRICTIONS` (`sunlight-only` / `interruptible` /
+`activation-required` / notes, each with source and date). To add a satellite:
 
 1. Add it to `SATELLITES` (NORAD ID, name, aliases).
 2. Add its `fm(...)` row with uplink/downlink MHz (bands are derived and must
@@ -306,7 +338,10 @@ tones, AMSAT status key) and `RESTRICTIONS` (sunlight-only / schedule-dependent
 3. Set `amsatStatusKey` to its name in AMSAT's status catalog
    (`https://status.amsat.org/api/v1/catalog.php`, for example `SO-50_[FM]`).
 4. Add any `RESTRICTIONS` rows with the source page and its date. Use
-   `sunlight-only` only if a source says so.
+   `sunlight-only` only if a source says so. Classify the operating pattern from that satellite's own
+   source text: `interruptible` only for a normally operating repeater that is sometimes switched off;
+   `activation-required` for scheduled, experimental or commanded activation (it will be excluded
+   until a confirmation source exists). When unsure, use `activation-required`, the conservative choice.
 5. Update `CATALOG_REVIEWED_AT` / `CATALOG_SOURCE_DATE`, run `npm test`.
 
 The refresh script and the app pick it up automatically. Re-check AMSAT's FM page
@@ -400,6 +435,6 @@ src/
   ui/            React components and styles
 scripts/         refresh-data.ts · smoke.ts · serve-subdir.mjs · e2e-smoke.mjs
 validation/      independent Skyfield comparison
-tests/           152 tests + labelled fixtures
+tests/           180 tests + labelled fixtures
 CLAUDE.md          working agreements for contributors
 ```

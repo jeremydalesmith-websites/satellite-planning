@@ -27,8 +27,12 @@ export function DataFreshness({ meta, tz, nowMs }: Props) {
         <dd>{oldest !== null && newest !== null ? (oldest === newest ? z(oldest) : `${z(oldest)} to ${z(newest)}`) : 'n/a'}</dd>
       </div>
       <div>
-        <dt>Operating status downloaded</dt>
-        <dd>{meta.statusDownloadedAt ? z(Date.parse(meta.statusDownloadedAt)) : 'unavailable: all repeaters unconfirmed'}</dd>
+        <dt>Status reports downloaded</dt>
+        <dd>{meta.statusDownloadedAt ? z(Date.parse(meta.statusDownloadedAt)) : 'unavailable: no satellite can be confirmed'}</dd>
+      </div>
+      <div>
+        <dt>Eligibility checked (existing reports, not re-downloaded)</dt>
+        <dd>{z(meta.eligibilityCheckedAtMs ?? meta.generatedAtMs)}</dd>
       </div>
       <div>
         <dt>Predictions calculated</dt>
@@ -37,7 +41,7 @@ export function DataFreshness({ meta, tz, nowMs }: Props) {
       {staleDays > 3 && (
         <div className="warn-row">
           <dt>Note</dt>
-          <dd>The downloaded data is {Math.round(staleDays)} days old. The site refreshes it automatically, but this copy may not have been updated yet.</dd>
+          <dd>This copy of the data was downloaded {Math.round(staleDays)} days ago. Searching does not download newer data, and reports older than 72 hours cannot qualify a satellite.</dd>
         </div>
       )}
     </dl>

@@ -4,7 +4,7 @@ import { fmtTime } from './format.ts';
 
 export interface TimelineItem {
   pass: PassAssessment;
-  kind: 'counted' | 'alternative' | 'conditional';
+  kind: 'counted' | 'alternative';
 }
 
 interface Props {
@@ -47,9 +47,7 @@ export function Timeline({ window, items, tz }: Props) {
         );
       })}
       <div className="tl-legend">
-        <span><i className="sw counted" /> counted</span>
-        <span><i className="sw alternative" /> overlaps</span>
-        <span><i className="sw conditional" /> conditional</span>
+        <span><i className="sw counted" /> usable time</span>
         <span><i className="sw line" /> whole pass</span>
       </div>
     </div>

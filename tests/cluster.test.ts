@@ -80,15 +80,17 @@ describe('repeated passes from one satellite', () => {
 });
 
 describe('status gating of the minimum', () => {
-  it('unknown, stale and schedule-unconfirmed passes never satisfy the minimum', () => {
-    const w = find([P(10, 14), P(60, 64, 60, 25544, 'unknown-stale'), P(110, 114, 60, 40908, 'schedule-dependent')]);
+  it('unknown, stale and activation-required passes never satisfy the minimum', () => {
+    const w = find([P(10, 14), P(60, 64, 60, 25544, 'unknown-stale'), P(110, 114, 60, 40908, 'activation-required')]);
     expect(w).toEqual([]);
   });
-  it('they are listed separately as conditional when a qualifying window exists', () => {
+  it('they do not appear anywhere in a qualifying window: not counted, not an alternative, not left-out', () => {
     const w = find([P(10, 14), P(60, 64), P(110, 114), P(120, 124, 60, 25544, 'unknown-stale')]);
     expect(w).toHaveLength(1);
     expect(w[0]!.counted).toHaveLength(3);
-    expect(w[0]!.conditional).toHaveLength(1);
+    const shown = [...w[0]!.counted, ...w[0]!.alternatives, ...w[0]!.edge, ...w[0]!.excluded];
+    expect(shown.some((a) => a.noradId === 25544)).toBe(false);
+    expect(w[0]!.distinctSatellites).toBe(1);
   });
   it('known-unavailable and eclipse-excluded passes do not inflate counts or scores', () => {
     const dead = P(20, 24, 80, 25544, 'known-unavailable');
@@ -96,7 +98,8 @@ describe('status gating of the minimum', () => {
     const ev = evaluateWindow(iv(0, 150), [P(10, 14), dead, eclipsed]);
     expect(ev.counted).toHaveLength(1);
     expect(ev.totalOperatingMs).toBe(4 * MIN);
-    expect(ev.excluded.map((x) => x.exclusion).sort()).toEqual(['eclipse', 'unavailable']);
+    // The eclipse-limited pass of an eligible satellite is listed as left out; the status-excluded one is not shown at all.
+    expect(ev.excluded.map((x) => x.exclusion)).toEqual(['eclipse']);
     void status;
   });
 });
@@ -159,11 +162,12 @@ describe('empty results explain themselves and never relax silently', () => {
     expect(d.suggestions).toEqual([]);
     expect(d.eligiblePasses).toBe(0);
   });
-  it('suggests fewer opportunities and counting-conditional as TEXT only; the original result stays empty', () => {
+  it('suggests fewer opportunities as TEXT only, never suggests counting unconfirmed satellites; the original result stays empty', () => {
     const all = [P(10, 14), P(60, 64), P(110, 114, 60, 25544, 'unknown-stale')];
     expect(find(all)).toEqual([]);
     const d = diagnose(inputs, [], new Map(), all, block(0, 600));
-    expect(d.suggestions.map((s) => s.kind)).toEqual(expect.arrayContaining(['fewer-opportunities', 'count-conditional']));
+    expect(d.suggestions.map((s) => s.kind)).toContain('fewer-opportunities');
+    expect(d.suggestions.map((s) => s.kind as string)).not.toContain('count-conditional');
     expect(find(all)).toEqual([]); // still empty: nothing was applied
   });
   it('detects that availability is the bottleneck', () => {

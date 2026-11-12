@@ -61,7 +61,7 @@ export async function loadData(): Promise<LoadResult> {
     if (!isStatusFile(raw)) throw new Error('unexpected format');
     status = raw;
   } catch (e) {
-    statusProblem = `Operating-status data is unavailable (${e instanceof Error ? e.message : String(e)}). Every repeater will be treated as unconfirmed.`;
+    statusProblem = `Operating-status data is unavailable (${e instanceof Error ? e.message : String(e)}). No satellite can be confirmed eligible without it, so none will be planned.`;
   }
   return { ok: true, data: { elements, status }, statusProblem };
 }

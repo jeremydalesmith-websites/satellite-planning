@@ -20,6 +20,8 @@ import type { AvailabilitySettings } from './availability/availability.ts';
 import { assessPass } from './eligibility/assess.ts';
 import type { PassAssessment } from './eligibility/assess.ts';
 import { classifyStatus } from './eligibility/status.ts';
+import { consideredIds, evaluateEligibility } from './eligibility/eligibility.ts';
+import type { SatelliteEligibility } from './eligibility/eligibility.ts';
 import type { OperationalStatus } from './eligibility/status.ts';
 import { findEventWindows } from './cluster/cluster.ts';
 import type { EventWindow } from './cluster/cluster.ts';
@@ -94,12 +96,17 @@ export interface PredictionMeta {
   elementsDownloadedAt: string;
   /** When the refresh job downloaded status reports; null if unavailable. */
   statusDownloadedAt: string | null;
+  /**
+   * The single current-time snapshot against which the 72-hour eligibility rule was evaluated.
+   * Existing reports were re-checked against this time; NO new reports were downloaded then.
+   */
+  eligibilityCheckedAtMs?: Ms;
   /** Epoch of each satellite's elements. */
   epochs: Record<number, Ms>;
 }
 
 export interface Suggestion {
-  kind: 'lower-elevation' | 'fewer-opportunities' | 'count-conditional' | 'longer-event' | 'more-availability';
+  kind: 'lower-elevation' | 'fewer-opportunities' | 'longer-event' | 'more-availability';
   text: string;
   windows: number;
 }
@@ -108,7 +115,6 @@ export interface Diagnosis {
   availabilityBlocks: number;
   blocksLongEnough: number;
   eligiblePasses: number;
-  conditionalPasses: number;
   suggestions: Suggestion[];
 }
 
@@ -118,9 +124,19 @@ export interface PlanInputs {
   criteria: Criteria;
   availability: AvailabilitySettings;
   range: Interval;
+  /**
+   * The user's selected satellites (NORAD IDs). Eligibility is applied on top: a selected but
+   * currently ineligible satellite is excluded here without altering the stored selection.
+   * undefined = the defaults (ISS, SO-50, AO-91).
+   */
+  selectedNoradIds?: readonly number[];
 }
 
 export interface PlanResult {
+  /** Eligibility of every catalog repeater at this search's single time snapshot. */
+  eligibility: SatelliteEligibility[];
+  /** Satellites that were both eligible and selected, i.e. the only ones that can appear below. */
+  consideredNoradIds: number[];
   windows: EventWindow[];
   assessments: PassAssessment[];
   availabilityIntervals: Interval[];
@@ -146,23 +162,31 @@ export function computePlan(
   generatedAtMs: Ms = nowMs,
 ): PlanResult {
   const { criteria } = inputs;
-  const statuses = statusMap(data, nowMs);
-  const assessments = assessAll(passes, statuses, criteria.minElevationDeg);
+  // ONE time snapshot (nowMs) for the whole search: eligibility, element age and metadata.
+  const eligibility = evaluateEligibility(data.status, nowMs);
+  const considered = consideredIds(eligibility, inputs.selectedNoradIds);
+  const statuses = new Map(eligibility.map((e) => [e.noradId, e.status]));
+  // Defence in depth: only eligible AND selected satellites ever reach assessment.
+  const planned = passes.filter((p) => considered.has(p.noradId));
+  const assessments = assessAll(planned, statuses, criteria.minElevationDeg);
   const availabilityIntervals = expandAvailability(inputs.availability, inputs.timeZone, inputs.range);
   const windows = findEventWindows(assessments, availabilityIntervals, criteria);
   const diagnosis =
     windows.length === 0
-      ? diagnose(inputs, passes, statuses, assessments, availabilityIntervals)
+      ? diagnose(inputs, planned, statuses, assessments, availabilityIntervals)
       : null;
   return {
+    eligibility,
+    consideredNoradIds: [...considered],
     windows,
     assessments,
     availabilityIntervals,
-    skipped,
-    predictionErrors,
+    skipped: skipped.filter((s) => considered.has(s.noradId)),
+    predictionErrors: predictionErrors.filter((e) => considered.has(e.noradId)),
     diagnosis,
     meta: {
       generatedAtMs,
+      eligibilityCheckedAtMs: nowMs,
       elementsDownloadedAt: data.elements.downloadedAt,
       statusDownloadedAt: data.status?.downloadedAt ?? null,
       epochs: Object.fromEntries(data.elements.sets.map((s) => [s.noradId, s.epochMs])),
@@ -173,7 +197,7 @@ export function computePlan(
 /**
  * Explain an empty result and suggest which input could be relaxed.
  * Suggestions are only ever TEXT: nothing is applied automatically
- * (no silent lowering of elevation, no added hours, no counting conditionals).
+ * (no silent lowering of elevation, no added hours, no counting unconfirmed satellites).
  */
 export function diagnose(
   inputs: PlanInputs,
@@ -192,10 +216,6 @@ export function diagnose(
     const n = count(assessments, blocks, D, criteria.minOpportunities - 1);
     if (n > 0) suggestions.push({ kind: 'fewer-opportunities', windows: n, text: `Requiring ${criteria.minOpportunities - 1} opportunities instead of ${criteria.minOpportunities} would give ${n} window${n === 1 ? '' : 's'}.` });
   }
-  const asConditional = assessments.map((a) => (a.verdict === 'conditional' ? { ...a, verdict: 'eligible' as const } : a));
-  const nCond = count(asConditional, blocks, D, criteria.minOpportunities);
-  if (nCond > 0) suggestions.push({ kind: 'count-conditional', windows: nCond, text: `${nCond} window${nCond === 1 ? '' : 's'} would qualify if passes with unconfirmed repeater status were counted, but their operation is not established, so they are shown as conditional only.` });
-
   const lower = Math.max(MIN_ELEVATION_INPUT_DEG, criteria.minElevationDeg - 10);
   if (lower < criteria.minElevationDeg) {
     const lowAs = assessAll(passes, statuses, lower);
@@ -215,7 +235,6 @@ export function diagnose(
     availabilityBlocks: blocks.length,
     blocksLongEnough: blocks.filter((b) => b.end - b.start >= D).length,
     eligiblePasses: assessments.filter((a) => a.verdict === 'eligible').length,
-    conditionalPasses: assessments.filter((a) => a.verdict === 'conditional').length,
     suggestions,
   };
 }

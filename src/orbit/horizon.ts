@@ -25,17 +25,20 @@ export function worstTier(tiers: HorizonTier[]): HorizonTier {
   return tiers.reduce<HorizonTier>((a, b) => (TIER_ORDER[b] > TIER_ORDER[a] ? b : a), 'near-term');
 }
 
-export const TIER_TEXT: Record<HorizonTier, { label: string; note: string }> = {
+export const TIER_TEXT: Record<HorizonTier, { label: string; short: string; note: string }> = {
   'near-term': {
     label: 'Near-term estimate',
+    short: 'Re-check closer to the date.',
     note: 'Based on orbital data from within the past week, so timing should hold up well. Re-check closer to the date.',
   },
   tentative: {
     label: 'Tentative estimate',
+    short: 'Pass times may drift; re-check before the event.',
     note: 'Pass times this far from the orbital data can drift. Treat marginal passes as uncertain and re-check before the event.',
   },
   provisional: {
     label: 'Provisional estimate',
+    short: 'Far beyond the orbital data: good for choosing a date, not minute-level planning.',
     note: 'This is far beyond the orbital data. Pass times can shift noticeably and some passes may appear or disappear when data is refreshed. Good for choosing a date, not for planning to the minute.',
   },
 };

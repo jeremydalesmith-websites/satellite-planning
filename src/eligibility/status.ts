@@ -9,9 +9,14 @@
  *   recently-reported-active  FM activity reported within the freshness window, with
  *                             no newer negative report. The only state that counts.
  *   known-unavailable         Repeated negative reports, no positive ones, in the window.
- *   schedule-dependent        Catalog says operation is scheduled / crew- / test-dependent
- *                             and there is no recent confirmation.
+ *   activation-required       Catalog says the repeater operates only when separately activated
+ *                             (scheduled, experimental or commanded). A recent report does not show
+ *                             it will be on for a predicted pass, and no activation confirmation
+ *                             source exists yet, so it never qualifies. Independent of the reports.
  *   unknown-stale             No usable recent reports (or they conflict).
+ *
+ * "Interruptible" (the ISS) is NOT a state: it is a normally operating repeater, so it qualifies on a
+ * recent positive report like any other, with a caveat attached to the explanation.
  *
  * Thresholds live in domain/policy.ts.
  */
@@ -27,7 +32,7 @@ import type { StatusFile } from '../data/ingest.ts';
 export type StatusState =
   | 'recently-reported-active'
   | 'known-unavailable'
-  | 'schedule-dependent'
+  | 'activation-required'
   | 'unknown-stale';
 
 /**
@@ -35,14 +40,22 @@ export type StatusState =
  * POLICY depends only on `state`; `detail` exists so the UI can say clearly which kind of
  * "no" this is.
  *
- *   active                 heard recently, nothing newer says otherwise      -> counts
- *   mixed                  heard AND a newer negative report                 -> not counted
- *   not-heard              negative report(s) only, too few to conclude      -> not counted
- *   confirmed-unavailable  repeated negatives from several operators         -> excluded
- *   no-recent-reports      nothing in the freshness window                   -> not counted
- *   no-data                no status data could be loaded                    -> not counted
+ *   active                 heard recently, nothing newer says otherwise      -> eligible
+ *   mixed                  heard AND a newer negative report                 -> left out of planning
+ *   not-heard              negative report(s) only, too few to conclude      -> left out
+ *   confirmed-unavailable  repeated negatives from several operators         -> left out
+ *   no-recent-reports      nothing in the freshness window                   -> left out
+ *   no-data                no status data could be loaded                    -> left out
+ *   activation-unconfirmed catalog: needs a confirmed activation window      -> left out (always, for now)
  */
-export type StatusDetail = 'active' | 'mixed' | 'not-heard' | 'confirmed-unavailable' | 'no-recent-reports' | 'no-data';
+export type StatusDetail =
+  | 'active'
+  | 'mixed'
+  | 'not-heard'
+  | 'confirmed-unavailable'
+  | 'no-recent-reports'
+  | 'no-data'
+  | 'activation-unconfirmed';
 
 export interface OperationalStatus {
   state: StatusState;
@@ -51,8 +64,10 @@ export interface OperationalStatus {
   label: string;
   /** One sentence explaining why, without absolute times (the UI adds those). */
   explanation: string;
-  /** From the catalog: operation is only at certain times, even if recently reported. */
-  scheduleDependent: boolean;
+  /** From the catalog: normally operating but subject to interruptions (ISS). Does not gate eligibility. */
+  interruptible: boolean;
+  /** From the catalog: needs a scheduled/experimental/commanded activation window. Gates eligibility. */
+  activationRequired: boolean;
   lastPositiveMs: Ms | null;
   lastNegativeMs: Ms | null;
   positives: number;
@@ -72,7 +87,7 @@ export interface OperationalStatus {
 export const STATUS_LABELS: Record<StatusState, string> = {
   'recently-reported-active': 'Recently reported active',
   'known-unavailable': 'Confirmed unavailable',
-  'schedule-dependent': 'Schedule-dependent (unconfirmed)',
+  'activation-required': 'Activation window required (not confirmed)',
   'unknown-stale': 'No recent reports',
 };
 
@@ -83,25 +98,78 @@ export const DETAIL_LABELS: Record<StatusDetail, string> = {
   'confirmed-unavailable': 'Confirmed unavailable',
   'no-recent-reports': 'No recent reports',
   'no-data': 'Status data unavailable',
+  'activation-unconfirmed': 'Activation window required (not confirmed)',
 };
 
+/**
+ * Why a repeater lacks the evidence this planner requires, or null if it has it.
+ * Deliberately worded as missing EVIDENCE, never as proof that the repeater is off.
+ * Lowercase fragment with no trailing period, so callers can build "NAME: <reason>."
+ */
+export function exclusionReason(s: Pick<OperationalStatus, 'state' | 'detail' | 'windowHours'>): string | null {
+  if (s.state === 'recently-reported-active') return null;
+  const base = `no qualifying FM report in the last ${s.windowHours} hours`;
+  switch (s.detail) {
+    case 'activation-unconfirmed':
+      return 'requires a confirmed activation window covering the pass, and none is available (a recent report alone does not qualify it)';
+    case 'no-data':
+      return 'status data unavailable, so eligibility cannot be established';
+    case 'mixed':
+      return `${base} (the newest FM report was negative)`;
+    case 'not-heard':
+    case 'confirmed-unavailable':
+      return `${base} (only negative reports)`;
+    default:
+      return base;
+  }
+}
+
+type StatusActivity = Pick<FmActivity, 'amsatStatusKey' | 'interruptible' | 'activationRequired'>;
+
+/**
+ * Classify a repeater from its reports, then apply the catalog's operating-pattern classification.
+ *
+ * Activation-required repeaters (scheduled, experimental or commanded activation) are NEVER eligible from
+ * recent reports alone: a recent "Heard" does not show the repeater will be on for a predicted pass. Until a
+ * source confirming activation windows exists (no importer in this iteration), they are conservatively excluded.
+ * The underlying report counts are kept for the diagnostic Details.
+ */
 export function classifyStatus(
-  activity: Pick<FmActivity, 'amsatStatusKey' | 'scheduleDependent'>,
+  activity: StatusActivity,
   file: StatusFile | null,
   nowMs: Ms,
   windowHours = STATUS_WINDOW_HOURS,
 ): OperationalStatus {
-  const sched = activity.scheduleDependent;
-  const schedNote = sched ? ' Operation is only at certain times, so it may not be on at the event.' : '';
-  const base = { scheduleDependent: sched, windowHours, dataDownloadedAt: file?.downloadedAt ?? null };
-  /** Not counted, and not "confirmed unavailable": the label keeps the schedule caveat when it applies. */
+  const s = classifyReports(activity, file, nowMs, windowHours);
+  if (!activity.activationRequired) return s;
+  return {
+    ...s,
+    state: 'activation-required',
+    detail: 'activation-unconfirmed',
+    label: STATUS_LABELS['activation-required'],
+    explanation:
+      'This repeater operates only when separately activated (scheduled, experimental or commanded). A recent report does not show it will be on for a predicted pass, and no activation window is available to confirm.',
+    countsTowardMinimum: false,
+  };
+}
+
+function classifyReports(
+  activity: StatusActivity,
+  file: StatusFile | null,
+  nowMs: Ms,
+  windowHours: number,
+): OperationalStatus {
+  const interruptible = activity.interruptible;
+  const schedNote = interruptible ? ' It is subject to interruptions by operations on its platform, so it may be off at the event.' : '';
+  const base = { interruptible, activationRequired: activity.activationRequired, windowHours, dataDownloadedAt: file?.downloadedAt ?? null };
+  /** Not eligible, and not "confirmed unavailable": too little evidence either way. */
   const unconfirmed = (detail: StatusDetail, explanation: string, c: Partial<OperationalStatus> = {}): OperationalStatus => {
-    const state: StatusState = sched ? 'schedule-dependent' : 'unknown-stale';
+    const state: StatusState = 'unknown-stale';
     return {
       ...base,
       state,
       detail,
-      label: detail === 'no-recent-reports' && sched ? STATUS_LABELS['schedule-dependent'] : DETAIL_LABELS[detail],
+      label: DETAIL_LABELS[detail],
       explanation,
       lastPositiveMs: null,
       lastNegativeMs: null,

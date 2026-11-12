@@ -70,6 +70,5 @@ for (const n of [3, 2]) {
   for (const w of plan.windows) {
     console.log(`${f(w.window.start)} -> ${DateTime.fromMillis(w.window.end, { zone: tz }).toFormat('HH:mm')}  count=${w.counted.length} satellites=${w.distinctSatellites} similarFolded=${w.similarWindows}`);
     for (const c of w.counted) console.log(`     counted  ${c.name.padEnd(8)} ${f2(c.operating!.start)}  peak ${c.fullMaxElevationDeg.toFixed(0)} deg`);
-    for (const c of w.conditional) console.log(`     conditional (not counted) ${c.name} ${f2(c.operating!.start)} [${c.status.state}]`);
   }
 }

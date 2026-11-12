@@ -15,10 +15,12 @@
 import type { FmActivity } from '../catalog/catalog.ts';
 import { duration, intersect } from '../domain/intervals.ts';
 import type { Interval, Ms, PassGeometry } from '../domain/types.ts';
+import { exclusionReason } from './status.ts';
 import type { OperationalStatus } from './status.ts';
 
-export type Verdict = 'eligible' | 'conditional' | 'excluded';
-export type ExclusionReason = 'below-threshold' | 'eclipse' | 'unavailable' | null;
+export type Verdict = 'eligible' | 'excluded';
+/** 'status' = the repeater lacks a qualifying recent FM report; such passes never appear in results. */
+export type ExclusionReason = 'below-threshold' | 'eclipse' | 'status' | null;
 export type SunlightState = 'illuminated' | 'partly-eclipsed' | 'eclipsed';
 
 export interface PassAssessment {
@@ -90,7 +92,11 @@ export function assessPass(
   let exclusion: ExclusionReason = null;
   let verdict: Verdict;
 
-  if (!above) {
+  if (status.state !== 'recently-reported-active') {
+    exclusion = 'status';
+    verdict = 'excluded';
+    reasons.push(`${activity.name}: ${exclusionReason(status) ?? 'no qualifying FM report'}.`);
+  } else if (!above) {
     exclusion = 'below-threshold';
     verdict = 'excluded';
     reasons.push(`Peaks at ${pass.maxElevationDeg.toFixed(0)}°, below the ${thresholdDeg}° minimum.`);
@@ -102,16 +108,9 @@ export function assessPass(
         ? 'The satellite is in Earth’s shadow for the whole pass, and this repeater should not be used in eclipse.'
         : `The part of the pass above ${thresholdDeg}° is in Earth’s shadow, and this repeater should not be used in eclipse.`,
     );
-  } else if (status.state === 'known-unavailable') {
-    exclusion = 'unavailable';
-    verdict = 'excluded';
-    reasons.push(`Not usable: ${status.label.toLowerCase()} by recent reports.`);
-  } else if (status.state === 'recently-reported-active') {
+  } else {
     verdict = 'eligible';
     reasons.push('Counts toward the event minimum.');
-  } else {
-    verdict = 'conditional';
-    reasons.push(`Not counted: this repeater\u2019s operation is unconfirmed (${status.label.toLowerCase()}).`);
   }
 
   if (restricted && operating && sunlight === 'partly-eclipsed') {

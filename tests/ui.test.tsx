@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { emptyAvailability } from '../src/availability/availability.ts';
 import { loadData } from '../src/data/load.ts';
+import type { StatusFile } from '../src/data/ingest.ts';
+import { evaluateEligibility } from '../src/eligibility/eligibility.ts';
 import { loadEvents, loadPrefs, saveEvents, savePrefs } from '../src/storage.ts';
 import { AvailabilityGrid } from '../src/ui/AvailabilityGrid.tsx';
 import { PlanForm } from '../src/ui/PlanForm.tsx';
@@ -126,6 +128,50 @@ describe('plan form', () => {
   });
 });
 
+describe('satellite selection', () => {
+  const heard = { reports: [[Math.floor((NOW - 3_600_000) / 1000), 'H', 0]] as [number, 'H', number][] };
+  const file = (keys: string[]): StatusFile => ({
+    schema: 1, source: { name: 't', url: 'u', license: 'x' }, downloadedAt: new Date(NOW).toISOString(),
+    satellites: Object.fromEntries(keys.map((k) => [k, heard])),
+  });
+  const eligNoAo91 = evaluateEligibility(file(['SO-50_[FM]', 'ISS_[FM]', 'AO-123_[FM]']), NOW);
+  const eligAll = evaluateEligibility(file(['SO-50_[FM]', 'ISS_[FM]', 'AO-123_[FM]', 'AO-91_[FM]']), NOW);
+  const box = (re: RegExp) => screen.getByRole('checkbox', { name: re }) as HTMLInputElement;
+
+  it('lists only eligible satellites; ISS and SO-50 start selected, other eligible ones start unchecked', () => {
+    render(<PlanForm busy={false} onSearch={() => {}} eligibility={eligNoAo91} />);
+    expect(box(/^ISS/).checked).toBe(true);
+    expect(box(/^SO-50/).checked).toBe(true);
+    expect(box(/^AO-123/).checked).toBe(false);
+    expect(screen.queryByRole('checkbox', { name: /^AO-91/ })).toBeNull(); // ineligible: not offered
+    expect(screen.queryByRole('checkbox', { name: /^TEVEL/ })).toBeNull();
+  });
+  it('says plainly that eligibility is checked against existing reports, not freshly downloaded ones', () => {
+    render(<PlanForm busy={false} onSearch={() => {}} eligibility={eligNoAo91} />);
+    expect(screen.getByText(/searching does not download new reports/i)).toBeTruthy();
+  });
+  it('a temporarily ineligible satellite stays selected; unchecked satellites are never reselected', async () => {
+    const onSearch = vi.fn();
+    const { rerender } = render(<PlanForm busy={false} onSearch={onSearch} eligibility={eligNoAo91} />);
+    expect(screen.getByText(/Still selected, but not eligible right now: AO-91/)).toBeTruthy();
+    await userEvent.click(box(/^ISS/)); // user unchecks ISS
+    await userEvent.type(screen.getByPlaceholderText('e.g. 42.35'), '42.35');
+    await userEvent.type(screen.getByPlaceholderText('e.g. -71.06'), '-71.06');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Saturday evening' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Find event windows' }));
+    const sent: number[] = onSearch.mock.calls[0]![0].selectedNoradIds;
+    expect(sent).toContain(43017); // AO-91 still selected although ineligible right now
+    expect(sent).toContain(27607);
+    expect(sent).not.toContain(25544);
+    expect(loadPrefs().selectedIds).toEqual(sent);
+
+    // Later AO-91 becomes eligible again: it returns, still selected; ISS stays unchecked.
+    rerender(<PlanForm busy={false} onSearch={onSearch} eligibility={eligAll} />);
+    expect(box(/^AO-91/).checked).toBe(true);
+    expect(box(/^ISS/).checked).toBe(false);
+  });
+});
+
 describe('local storage robustness', () => {
   it('ignores corrupt stored data', () => {
     localStorage.setItem('satplanner.prefs.v1', '{not json');
@@ -168,7 +214,7 @@ describe('data loading', () => {
     respond({ 'data/elements.json': { body: JSON.stringify(elementsFixture) } });
     const r = await loadData();
     expect(r.ok && r.data.status).toBeNull();
-    expect(r.ok && r.statusProblem).toMatch(/unconfirmed/);
+    expect(r.ok && r.statusProblem).toMatch(/none will be planned/);
   });
 });
 

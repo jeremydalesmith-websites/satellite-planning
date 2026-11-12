@@ -16,10 +16,10 @@ export const activity = (noradId: number): FmActivity => ACTIVITIES.find((a) => 
 export const SO50 = 27607; // not sunlight-dependent
 export const AO91 = 43017; // sunlight-dependent
 
-export function status(state: StatusState, scheduleDependent = false): OperationalStatus {
+export function status(state: StatusState, interruptible = false): OperationalStatus {
   return {
-    state, label: STATUS_LABELS[state], explanation: 'test', scheduleDependent,
-    detail: state === 'recently-reported-active' ? 'active' : state === 'known-unavailable' ? 'confirmed-unavailable' : 'no-recent-reports',
+    state, label: STATUS_LABELS[state], explanation: 'test', interruptible, activationRequired: state === 'activation-required',
+    detail: state === 'recently-reported-active' ? 'active' : state === 'known-unavailable' ? 'confirmed-unavailable' : state === 'activation-required' ? 'activation-unconfirmed' : 'no-recent-reports',
     lastPositiveMs: null, lastNegativeMs: null, positives: 0, negatives: 0, notHeard: 0, beaconOnly: 0, windowHours: 72,
     dataDownloadedAt: null, countsTowardMinimum: state === 'recently-reported-active',
   };
