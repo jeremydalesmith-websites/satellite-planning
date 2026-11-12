@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { emptyAvailability } from '../src/availability/availability.ts';
+import { emptyAvailability, mergedDayRanges } from '../src/availability/availability.ts';
 import { loadData } from '../src/data/load.ts';
 import type { StatusFile } from '../src/data/ingest.ts';
 import { evaluateEligibility } from '../src/eligibility/eligibility.ts';
@@ -65,6 +65,63 @@ describe('availability grid', () => {
     expect(screen.queryByText(/not sunrise or sunset/)).toBeNull();
     expect(screen.queryByText('America/New_York')).toBeNull();
   });
+  describe('Check all / Uncheck all', () => {
+    const custom = () => {
+      const a = emptyAvailability();
+      a.periods = { morning: { startMin: 6 * 60, endMin: 11 * 60 }, midday: { startMin: 11 * 60, endMin: 15 * 60 }, evening: { startMin: 18 * 60, endMin: 23 * 60 } };
+      a.selected.morning[1] = true; // partially selected to start with
+      a.selected.evening[6] = true;
+      return a;
+    };
+    const cellCount = (v: ReturnType<typeof emptyAvailability>) => Object.values(v.selected).reduce((n, row) => n + row.length, 0);
+
+    it('are compact non-submit buttons placed above the grid', () => {
+      const { container } = render(<AvailabilityGrid value={emptyAvailability()} onChange={() => {}} />);
+      const check = screen.getByRole('button', { name: 'Check all' });
+      const uncheck = screen.getByRole('button', { name: 'Uncheck all' });
+      expect(check.getAttribute('type')).toBe('button');
+      expect(uncheck.getAttribute('type')).toBe('button');
+      const actions = container.querySelector('.grid-actions')!;
+      const table = container.querySelector('table.grid')!;
+      expect(actions.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // actions come before the grid
+    });
+    it('Check all checks exactly the 21 day x period boxes and leaves the time ranges alone', async () => {
+      const onChange = vi.fn();
+      const start = custom();
+      render(<AvailabilityGrid value={start} onChange={onChange} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Check all' }));
+      expect(onChange).toHaveBeenCalledTimes(1);
+      const next = onChange.mock.calls[0]![0] as ReturnType<typeof emptyAvailability>;
+      expect(cellCount(next)).toBe(21);
+      for (const row of Object.values(next.selected)) expect(row.every((x) => x === true)).toBe(true);
+      expect(next.periods).toEqual(start.periods); // ranges untouched
+    });
+    it('Uncheck all clears all 21 boxes, including partly selected ones, and leaves the time ranges alone', async () => {
+      const onChange = vi.fn();
+      const start = custom();
+      render(<AvailabilityGrid value={start} onChange={onChange} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Uncheck all' }));
+      const next = onChange.mock.calls[0]![0] as ReturnType<typeof emptyAvailability>;
+      expect(cellCount(next)).toBe(21);
+      for (const row of Object.values(next.selected)) expect(row.every((x) => x === false)).toBe(true);
+      expect(next.periods).toEqual(start.periods);
+    });
+    it('do not mutate the value they were given', async () => {
+      const start = custom();
+      const copy = JSON.stringify(start);
+      render(<AvailabilityGrid value={start} onChange={() => {}} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Check all' }));
+      expect(JSON.stringify(start)).toBe(copy);
+    });
+    it('the "How your selection combines" display is gone, while the merging logic still works', () => {
+      render(<AvailabilityGrid value={emptyAvailability()} onChange={() => {}} />);
+      expect(screen.queryByText('How your selection combines')).toBeNull();
+      const a = emptyAvailability();
+      a.selected.midday[1] = true;
+      a.selected.evening[1] = true; // adjacent periods still merge into one block (Monday 12:00-22:00)
+      expect(mergedDayRanges(a, 1)).toEqual([[12 * 60, 22 * 60]]);
+    });
+  });
   it('reports a toggle through onChange with the right cell', async () => {
     const onChange = vi.fn();
     render(<AvailabilityGrid value={emptyAvailability()} onChange={onChange} timeZone="UTC" />);
@@ -73,11 +130,12 @@ describe('availability grid', () => {
     expect(next.selected.midday[2]).toBe(true);
     expect(next.selected.midday.filter(Boolean)).toHaveLength(1);
   });
-  it('shows merged blocks for adjacent periods', () => {
+  it('adjacent periods still merge into one block (logic kept; the on-screen preview was removed)', () => {
     const v = emptyAvailability();
     v.selected.midday[6] = true; v.selected.evening[6] = true;
     render(<AvailabilityGrid value={v} onChange={() => {}} timeZone="UTC" />);
-    expect(screen.getByText(/12:00 PM–10:00 PM/)).toBeTruthy();
+    expect(screen.queryByText(/12:00 PM–10:00 PM/)).toBeNull(); // no preview display
+    expect(mergedDayRanges(v, 6)).toEqual([[12 * 60, 22 * 60]]); // Saturday midday + evening = one 12:00-22:00 block
   });
   it('lets you edit period boundaries', async () => {
     const onChange = vi.fn();
@@ -182,6 +240,56 @@ describe('plan form', () => {
     expect(getCurrentPosition).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('button', { name: 'Use my location' }));
     expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('availability Check all / Uncheck all inside the plan form', () => {
+  const boxes = () => screen.getAllByRole('checkbox') as HTMLInputElement[];
+  it('do not trigger a search, persist through the existing settings, and change nothing else', async () => {
+    const onSearch = vi.fn();
+    savePrefs({ latText: '42.35', lonText: '-71.06', timeZone: 'Pacific/Auckland', minElevationText: '55', durationMin: 180, minOpportunitiesText: '4', availability: emptyAvailability(), selectedIds: [27607] });
+    render(<PlanForm busy={false} onSearch={onSearch} />);
+    expect(boxes()).toHaveLength(21);
+    await userEvent.click(screen.getByRole('button', { name: 'Check all' }));
+    expect(onSearch).not.toHaveBeenCalled(); // type=button: no form submit
+    expect(boxes().every((b) => b.checked)).toBe(true);
+    const saved = loadPrefs();
+    for (const row of Object.values(saved.availability!.selected)) expect(row).toEqual(Array(7).fill(true));
+    // nothing else changed
+    expect(saved.timeZone).toBe('Pacific/Auckland');
+    expect(saved.latText).toBe('42.35');
+    expect(saved.minElevationText).toBe('55');
+    expect(saved.durationMin).toBe(180);
+    expect(saved.minOpportunitiesText).toBe('4');
+    expect(saved.selectedIds).toEqual([27607]);
+    expect(saved.availability!.periods).toEqual(emptyAvailability().periods);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Uncheck all' }));
+    expect(onSearch).not.toHaveBeenCalled();
+    expect(boxes().every((b) => !b.checked)).toBe(true);
+    for (const row of Object.values(loadPrefs().availability!.selected)) expect(row).toEqual(Array(7).fill(false));
+  });
+  it('individual checkbox editing still works after Check all', async () => {
+    render(<PlanForm busy={false} onSearch={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Check all' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Saturday evening' }));
+    expect((screen.getByRole('checkbox', { name: 'Saturday evening' }) as HTMLInputElement).checked).toBe(false);
+    expect(boxes().filter((b) => b.checked)).toHaveLength(20);
+    const saved = loadPrefs().availability!.selected;
+    expect(saved.evening[6]).toBe(false);
+    expect(saved.evening[5]).toBe(true);
+  });
+  it('leave the time ranges and the satellite selection alone', async () => {
+    const heard = { reports: [[Math.floor((NOW - 3_600_000) / 1000), 'H', 0]] as [number, 'H', number][] };
+    const elig = evaluateEligibility({ schema: 1, source: { name: 't', url: 'u', license: 'x' }, downloadedAt: new Date(NOW).toISOString(), satellites: { 'SO-50_[FM]': heard, 'ISS_[FM]': heard } } as StatusFile, NOW);
+    render(<PlanForm busy={false} onSearch={() => {}} eligibility={elig} />);
+    const sat = () => (screen.getAllByRole('checkbox') as HTMLInputElement[]).filter((b) => /^(ISS|SO-50)/.test(b.getAttribute('aria-label') ?? b.closest('label')?.textContent ?? '')).map((b) => b.checked);
+    const before = sat();
+    const rangesBefore = (screen.getAllByDisplayValue(/^\d\d:\d\d$/) as HTMLInputElement[]).map((i) => i.value);
+    await userEvent.click(screen.getByRole('button', { name: 'Check all' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Uncheck all' }));
+    expect(sat()).toEqual(before);
+    expect((screen.getAllByDisplayValue(/^\d\d:\d\d$/) as HTMLInputElement[]).map((i) => i.value)).toEqual(rangesBefore);
   });
 });
 

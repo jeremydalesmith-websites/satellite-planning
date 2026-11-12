@@ -4,7 +4,6 @@ import {
   WEEKDAY_LABELS,
   formatMinutes,
   inputToMinutes,
-  mergedDayRanges,
   minutesToInput,
 } from '../availability/availability.ts';
 import type { AvailabilitySettings, PeriodId } from '../availability/availability.ts';
@@ -30,6 +29,12 @@ export function AvailabilityGrid({ value, onChange, invalid, describedBy }: Prop
     // An end time of 23:59 means "until midnight".
     const min = which === 'endMin' && parsed === 1439 ? 1440 : parsed;
     onChange({ ...value, periods: { ...value.periods, [p]: { ...value.periods[p], [which]: min } } });
+  };
+  /** Check or uncheck all 21 day x period boxes. Time-range definitions are not touched. */
+  const setAll = (checked: boolean) => {
+    const selected = { ...value.selected };
+    for (const p of PERIOD_IDS) selected[p] = value.selected[p].map(() => checked);
+    onChange({ ...value, selected });
   };
   const toggleDay = (d: number) => {
     const all = PERIOD_IDS.every((p) => value.selected[p][d]);
@@ -67,6 +72,11 @@ export function AvailabilityGrid({ value, onChange, invalid, describedBy }: Prop
         ))}
       </div>
 
+      <div className="grid-actions">
+        <button type="button" onClick={() => setAll(true)}>Check all</button>
+        <button type="button" onClick={() => setAll(false)}>Uncheck all</button>
+      </div>
+
       <table className="grid">
         <caption className="sr-only">Weekly availability. Each checkbox is one day and time period.</caption>
         <thead>
@@ -102,21 +112,6 @@ export function AvailabilityGrid({ value, onChange, invalid, describedBy }: Prop
           ))}
         </tbody>
       </table>
-
-      <details className="merge-preview">
-        <summary>How your selection combines</summary>
-        <p className="hint small">Adjacent or overlapping periods merge into one block, so a Midday + Evening event can run across the boundary.</p>
-        <ul>
-          {WEEKDAY_LABELS.map((d, i) => {
-            const r = mergedDayRanges(value, i);
-            return (
-              <li key={d}>
-                <strong>{d}:</strong> {r.length ? r.map(([a, b]) => `${formatMinutes(a)}–${formatMinutes(b)}`).join(', ') : 'not available'}
-              </li>
-            );
-          })}
-        </ul>
-      </details>
     </fieldset>
   );
 }
