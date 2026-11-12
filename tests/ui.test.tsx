@@ -75,7 +75,7 @@ describe('availability grid', () => {
     };
     const cellCount = (v: ReturnType<typeof emptyAvailability>) => Object.values(v.selected).reduce((n, row) => n + row.length, 0);
 
-    it('are compact non-submit buttons placed above the grid', () => {
+    it('are compact non-submit buttons placed below the whole grid, inside the Availability section', () => {
       const { container } = render(<AvailabilityGrid value={emptyAvailability()} onChange={() => {}} />);
       const check = screen.getByRole('button', { name: 'Check all' });
       const uncheck = screen.getByRole('button', { name: 'Uncheck all' });
@@ -83,7 +83,12 @@ describe('availability grid', () => {
       expect(uncheck.getAttribute('type')).toBe('button');
       const actions = container.querySelector('.grid-actions')!;
       const table = container.querySelector('table.grid')!;
-      expect(actions.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // actions come before the grid
+      expect(table.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // actions come after the grid (after the Evening row)
+      expect(container.querySelector('fieldset.avail')!.contains(actions)).toBe(true);
+      const lastRow = table.querySelector('tbody tr:last-child')!;
+      expect(lastRow.textContent).toContain('Evening');
+      expect(lastRow.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(check.compareDocumentPosition(uncheck) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // side by side, Check all first
     });
     it('Check all checks exactly the 21 day x period boxes and leaves the time ranges alone', async () => {
       const onChange = vi.fn();

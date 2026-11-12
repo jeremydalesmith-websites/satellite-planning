@@ -72,11 +72,6 @@ export function AvailabilityGrid({ value, onChange, invalid, describedBy }: Prop
         ))}
       </div>
 
-      <div className="grid-actions">
-        <button type="button" onClick={() => setAll(true)}>Check all</button>
-        <button type="button" onClick={() => setAll(false)}>Uncheck all</button>
-      </div>
-
       <table className="grid">
         <caption className="sr-only">Weekly availability. Each checkbox is one day and time period.</caption>
         <thead>
@@ -112,6 +107,11 @@ export function AvailabilityGrid({ value, onChange, invalid, describedBy }: Prop
           ))}
         </tbody>
       </table>
+
+      <div className="grid-actions">
+        <button type="button" onClick={() => setAll(true)}>Check all</button>
+        <button type="button" onClick={() => setAll(false)}>Uncheck all</button>
+      </div>
     </fieldset>
   );
 }
