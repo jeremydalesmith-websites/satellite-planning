@@ -13,6 +13,8 @@ import { PlanForm } from './PlanForm.tsx';
 import { Results } from './Results.tsx';
 import { SavedEvents } from './SavedEvents.tsx';
 import { SOURCES } from '../catalog/catalog.ts';
+import { browserTimeZone } from './PlanForm.tsx';
+import { fmtDateTime, tzAbbrev } from './format.ts';
 
 type Tab = 'plan' | 'saved';
 type Search =
@@ -20,6 +22,12 @@ type Search =
   | { state: 'running'; done: number; total: number; name: string }
   | { state: 'error'; message: string }
   | { state: 'done'; inputs: PlanInputs; result: PlanResult; nowMs: number };
+
+/** Date and time with a zone abbreviation, in the browser's own time zone. */
+const stamp = (ms: number) => {
+  const tz = browserTimeZone();
+  return `${fmtDateTime(ms, tz)} ${tzAbbrev(ms, tz)}`;
+};
 
 export function App() {
   const [tab, setTab] = useState<Tab>('plan');
@@ -172,6 +180,12 @@ export function App() {
           <summary>About this planner, data sources and limits</summary>
           <ul>
             <li>Orbits are calculated in your browser with SGP4 (satellite.js) from public orbital elements published by <a href={SOURCES.amsatTle.url}>AMSAT</a>.</li>
+            {data && (
+              <li>
+                Status reports downloaded {data.status ? stamp(Date.parse(data.status.downloadedAt)) : '(none available)'}.
+                Eligibility was last checked against the current time at {stamp(nowMs)}. Searching re-checks the existing reports and does not download new ones.
+              </li>
+            )}
             <li>Repeater activity comes from volunteer reports on the <a href={SOURCES.amsatStatus.url}>AMSAT status page</a> (reports licensed CC BY 4.0). A satellite is considered only with a “heard” report for its FM repeater in the last 72 hours; a heard beacon does not count. Searching re-checks existing reports against the current time and does not download new ones.</li>
             <li>Frequencies and operating notes were copied by hand from <a href={SOURCES.amsatFm.url}>AMSAT’s FM satellite page</a>; they are not live and may be out of date.</li>
             <li>Predictions weeks ahead are estimates, not second-accurate. Re-check close to the event; saved events do this for you when opened.</li>

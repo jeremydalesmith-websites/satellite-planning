@@ -178,9 +178,19 @@ details.more > summary { cursor: pointer; margin: .4rem 0; }
 .card.diagnostics { margin-top: 1rem; }
 .card.diagnostics summary { cursor: pointer; font-weight: 600; }
 
-/* Compact dates and time zone */
-.date-range { display: flex; align-items: center; gap: .5rem; }
+/* Compact location, dates and time zone */
+.loc-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.loc-row .coord { flex: 0 1 10rem; min-width: 8rem; }
+.loc-row .coord input { width: 100%; }
+.loc-row > button { flex: 0 0 auto; }
+.date-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.date-range { display: flex; align-items: center; gap: 8px; flex: 0 1 25rem; min-width: min(100%, 17rem); }
 .date-range input { flex: 1 1 0; min-width: 0; }
 .date-range .dash { opacity: .7; }
+.date-row .chips { margin-top: 0; flex-wrap: wrap; }
 .tz-line { margin: .5rem 0 .25rem; font-size: .9em; }
 button.link { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; }
+@media (max-width: 480px) {
+  .loc-row .coord { flex: 1 1 8rem; }
+  .date-range input { padding-inline: 8px; font-size: .95rem; }
+}

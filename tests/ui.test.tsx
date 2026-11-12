@@ -59,7 +59,10 @@ describe('availability grid', () => {
     expect(boxes).toHaveLength(21);
     boxes.forEach((b) => expect((b as HTMLInputElement).checked).toBe(false));
     expect(screen.getByRole('checkbox', { name: 'Saturday evening' })).toBeTruthy();
-    expect(screen.getByText('America/New_York')).toBeTruthy(); // timezone shown next to the grid
+    // Titled "Availability" with the short intro; the time zone is no longer repeated here (it is in the form's compact line).
+    expect(screen.getByText('Availability')).toBeTruthy();
+    expect(screen.getByText('Set time ranges, then check the days you’re available.')).toBeTruthy();
+    expect(screen.queryByText('America/New_York')).toBeNull();
   });
   it('reports a toggle through onChange with the right cell', async () => {
     const onChange = vi.fn();
@@ -125,6 +128,12 @@ describe('plan form', () => {
       'Search from',
     ]) expect(text).not.toContain(gone);
     expect(screen.getByText('Dates')).toBeTruthy();
+    expect(screen.getByText('Location')).toBeTruthy();
+    expect(screen.queryByText('Where will the event be?')).toBeNull();
+    expect(screen.getByLabelText(/^Latitude/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Longitude/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use my location' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Use my current location' })).toBeNull();
     expect(screen.getByLabelText('Start date')).toBeTruthy();
     expect(screen.getByLabelText('End date')).toBeTruthy();
     expect(text).toContain('–');
@@ -167,7 +176,7 @@ describe('plan form', () => {
     vi.stubGlobal('navigator', { ...navigator, geolocation: { getCurrentPosition } });
     render(<PlanForm busy={false} onSearch={() => {}} />);
     expect(getCurrentPosition).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole('button', { name: 'Use my current location' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Use my location' }));
     expect(getCurrentPosition).toHaveBeenCalledTimes(1);
   });
 });
@@ -190,9 +199,12 @@ describe('satellite selection', () => {
     expect(screen.queryByRole('checkbox', { name: /^AO-91/ })).toBeNull(); // ineligible: not offered
     expect(screen.queryByRole('checkbox', { name: /^TEVEL/ })).toBeNull();
   });
-  it('says plainly that eligibility is checked against existing reports, not freshly downloaded ones', () => {
-    render(<PlanForm busy={false} onSearch={() => {}} eligibility={eligNoAo91} />);
-    expect(screen.getByText(/searching does not download new reports/i)).toBeTruthy();
+  it('keeps the block compact: no explanatory paragraph beside the selection controls (timestamps live in the footer details)', () => {
+    const { container } = render(<PlanForm busy={false} onSearch={() => {}} eligibility={eligNoAo91} />);
+    const text = container.textContent ?? '';
+    expect(text).not.toMatch(/Only satellites with a/);
+    expect(text).not.toMatch(/searching does not download/i);
+    expect(screen.getByText('Satellites to consider')).toBeTruthy();
   });
   it('a temporarily ineligible satellite stays selected; unchecked satellites are never reselected', async () => {
     const onSearch = vi.fn();

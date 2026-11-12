@@ -1,6 +1,5 @@
 import { ACTIVITIES, compactBands } from '../catalog/catalog.ts';
 import type { SatelliteEligibility } from '../eligibility/eligibility.ts';
-import { fmtDateTime, tzAbbrev } from './format.ts';
 
 interface Props {
   /** null while data is loading or could not be loaded. */
@@ -8,7 +7,6 @@ interface Props {
   /** The user's EFFECTIVE selection (stored choice, or the defaults when nothing was chosen yet). */
   selected: readonly number[];
   onToggle: (noradId: number) => void;
-  tz: string;
 }
 
 /**
@@ -16,7 +14,7 @@ interface Props {
  * The selection itself is never edited by eligibility: a selected satellite that is not eligible
  * right now is only mentioned here, and is used again automatically if it becomes eligible.
  */
-export function SatellitePicker({ eligibility, selected, onToggle, tz }: Props) {
+export function SatellitePicker({ eligibility, selected, onToggle }: Props) {
   if (!eligibility) {
     return (
       <fieldset className="sat-picker">
@@ -27,7 +25,6 @@ export function SatellitePicker({ eligibility, selected, onToggle, tz }: Props) 
   }
   const eligible = eligibility.filter((e) => e.eligible);
   const heldBack = eligibility.filter((e) => !e.eligible && selected.includes(e.noradId));
-  const downloaded = eligibility[0]?.status.dataDownloadedAt ?? null;
   const act = (id: number) => ACTIVITIES.find((a) => a.noradId === id);
 
   return (
@@ -60,11 +57,6 @@ export function SatellitePicker({ eligibility, selected, onToggle, tz }: Props) 
           Still selected, but not eligible right now: {heldBack.map((e) => e.name).join(', ')}. They stay out of results until they have a qualifying report, then return automatically.
         </p>
       )}
-      <p className="hint small">
-        Only satellites with a “heard” report for their FM repeater in the last 72 hours are listed. That is evidence of operation now, not a promise for the event date.
-        {' '}Eligibility is checked against the current time using status reports downloaded{' '}
-        {downloaded ? `${fmtDateTime(Date.parse(downloaded), tz)} ${tzAbbrev(Date.parse(downloaded), tz)}` : '(none available)'}; searching does not download new reports.
-      </p>
     </fieldset>
   );
 }

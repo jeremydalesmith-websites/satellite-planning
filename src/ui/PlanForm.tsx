@@ -121,36 +121,38 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
       )}
 
       <fieldset>
-        <legend>Where will the event be?</legend>
-        <div className="row two">
-          <label>
+        <legend>Location</legend>
+        <div className="loc-row">
+          <label className="coord">
             Latitude (°)
             <input inputMode="decimal" value={f.latText} onChange={(e) => set('latText', e.target.value)} placeholder="e.g. 42.35" aria-invalid={!!err('latText')} aria-describedby="lat-err" autoComplete="off" />
-            <span className="field-err" id="lat-err">{err('latText')?.message}</span>
           </label>
-          <label>
+          <label className="coord">
             Longitude (°)
             <input inputMode="decimal" value={f.lonText} onChange={(e) => set('lonText', e.target.value)} placeholder="e.g. -71.06" aria-invalid={!!err('lonText')} aria-describedby="lon-err" autoComplete="off" />
-            <span className="field-err" id="lon-err">{err('lonText')?.message}</span>
           </label>
+          <button type="button" className="secondary" onClick={locate}>Use my location</button>
         </div>
-        <button type="button" className="secondary" onClick={locate}>Use my current location</button>
+        <span className="field-err" id="lat-err">{err('latText')?.message}</span>
+        <span className="field-err" id="lon-err">{err('lonText')?.message}</span>
         {geoMsg && <p className="hint small" role="status">{geoMsg}</p>}
       </fieldset>
 
       <fieldset>
         <legend>Dates</legend>
-        <div className="date-range">
-          <input type="date" aria-label="Start date" value={f.startDate} onChange={(e) => set('startDate', e.target.value)} aria-invalid={!!err('endDate')} aria-describedby="end-err" />
-          <span className="dash" aria-hidden="true">–</span>
-          <input type="date" aria-label="End date" value={f.endDate} onChange={(e) => set('endDate', e.target.value)} aria-invalid={!!err('endDate')} aria-describedby="end-err" />
+        <div className="date-row">
+          <div className="date-range">
+            <input type="date" aria-label="Start date" value={f.startDate} onChange={(e) => set('startDate', e.target.value)} aria-invalid={!!err('endDate')} aria-describedby="end-err" />
+            <span className="dash" aria-hidden="true">–</span>
+            <input type="date" aria-label="End date" value={f.endDate} onChange={(e) => set('endDate', e.target.value)} aria-invalid={!!err('endDate')} aria-describedby="end-err" />
+          </div>
+          <div className="chips" role="group" aria-label="Quick date range">
+            {[14, 28, MAX_SEARCH_DAYS].map((n) => (
+              <button type="button" className="chip" key={n} onClick={() => setRange(n)}>{n} days</button>
+            ))}
+          </div>
         </div>
         <span className="field-err" id="end-err">{err('endDate')?.message}</span>
-        <div className="chips" role="group" aria-label="Quick date range">
-          {[14, 28, MAX_SEARCH_DAYS].map((n) => (
-            <button type="button" className="chip" key={n} onClick={() => setRange(n)}>{n} days</button>
-          ))}
-        </div>
         {/* Time zone: the browser's zone unless the user saved another. Not derived from the coordinates. */}
         <p className="tz-line">
           Times: <strong>{f.timeZone || 'unset'}</strong> ·{' '}
@@ -195,7 +197,7 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
         </div>
       </fieldset>
 
-      <SatellitePicker eligibility={eligibility} selected={selected} onToggle={toggle} tz={f.timeZone} />
+      <SatellitePicker eligibility={eligibility} selected={selected} onToggle={toggle} />
 
       <AvailabilityGrid
         value={f.availability}

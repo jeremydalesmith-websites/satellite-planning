@@ -12,12 +12,13 @@ import type { AvailabilitySettings, PeriodId } from '../availability/availabilit
 interface Props {
   value: AvailabilitySettings;
   onChange: (v: AvailabilitySettings) => void;
-  timeZone: string;
+  /** Kept for callers; the zone is shown once, in the form's compact "Times: ... · Change" line. */
+  timeZone?: string;
   invalid?: boolean;
   describedBy?: string;
 }
 
-export function AvailabilityGrid({ value, onChange, timeZone, invalid, describedBy }: Props) {
+export function AvailabilityGrid({ value, onChange, invalid, describedBy }: Props) {
   const toggle = (p: PeriodId, d: number) => {
     const row = value.selected[p].slice();
     row[d] = !row[d];
@@ -43,11 +44,8 @@ export function AvailabilityGrid({ value, onChange, timeZone, invalid, described
 
   return (
     <fieldset className="avail" aria-invalid={invalid || undefined} aria-describedby={describedBy}>
-      <legend>When are you available?</legend>
-      <p className="hint">
-        Tick every day and period when families can attend. An event must fit entirely inside the times you tick; unticked
-        times are treated as unavailable. Times are in <strong>{timeZone}</strong>.
-      </p>
+      <legend>Availability</legend>
+      <p className="hint">Set time ranges, then check the days you’re available.</p>
 
       <div className="periods">
         {PERIOD_IDS.map((p) => (
