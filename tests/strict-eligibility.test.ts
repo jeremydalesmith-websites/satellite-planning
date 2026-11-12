@@ -69,13 +69,54 @@ describe('newer negative and mixed reports are treated exactly as before', () =>
     expect(classifyStatus(so50, f, NOW).detail).toBe('mixed');
     const e = byName(f)['SO-50']!;
     expect(e.eligible).toBe(false);
-    expect(e.reason).toMatch(/newest FM report was negative/);
+    expect(e.reason).toContain('followed by a newer “Not Heard” report (mixed evidence)');
   });
   it('a positive newer than the last negative still qualifies', () => {
     expect(byName(only('SO-50_[FM]', [[hAgo(4), 'N', 0], [hAgo(1), 'H', 1]]))['SO-50']!.eligible).toBe(true);
   });
   it('repeated negatives are not eligible', () => {
     expect(byName(only('SO-50_[FM]', [[hAgo(1), 'N', 0], [hAgo(2), 'T', 1]]))['SO-50']!.eligible).toBe(false);
+  });
+});
+
+describe('diagnostic wording distinguishes three kinds of "no" (wording only: eligibility is unchanged)', () => {
+  const reason = (reports: StatusFile['satellites'][string]['reports']) => byName(only('AO-123_[FM]', reports))['AO-123']!;
+  const noPositive = reason([]);
+  const afterNotHeard = reason([[hAgo(30), 'H', 0], [hAgo(20), 'H', 1], [hAgo(2), 'N', 2]]);
+  const afterBeacon = reason([[hAgo(30), 'H', 0], [hAgo(20), 'H', 1], [hAgo(2), 'T', 2]]);
+
+  it('1. no recent positive FM report', () => {
+    expect(noPositive.reason).toBe('no qualifying FM report in the last 72 hours');
+  });
+  it('2. recent positive reports superseded by a newer "Not Heard" report: mixed evidence, naming Not Heard', () => {
+    expect(afterNotHeard.reason).toBe('recent positive FM reports were followed by a newer “Not Heard” report (mixed evidence), so they are not treated as current evidence');
+  });
+  it('3. recent positive reports superseded by a newer beacon/telemetry-only report: mixed evidence, naming the beacon', () => {
+    expect(afterBeacon.reason).toBe('recent positive FM reports were followed by a newer beacon/telemetry-only report (mixed evidence), so they are not treated as current evidence');
+  });
+  it('the three are distinct, and none of them is eligible (the policy is unchanged)', () => {
+    expect(new Set([noPositive.reason, afterNotHeard.reason, afterBeacon.reason]).size).toBe(3);
+    expect([noPositive, afterNotHeard, afterBeacon].map((e) => e.eligible)).toEqual([false, false, false]);
+  });
+  it('names the NEWEST contrary report: Not Heard then a later beacon-only report is described as beacon-only, and the reverse as Not Heard', () => {
+    expect(reason([[hAgo(30), 'H', 0], [hAgo(5), 'N', 1], [hAgo(2), 'T', 2]]).reason).toContain('beacon/telemetry-only');
+    expect(reason([[hAgo(30), 'H', 0], [hAgo(5), 'T', 1], [hAgo(2), 'N', 2]]).reason).toMatch(/“Not Heard”/);
+  });
+  it('matches an AO-123-like history (many Heard, then several beacon-only and one Not Heard, newest beacon-only)', () => {
+    const history: StatusFile['satellites'][string]['reports'] = [
+      ...Array.from({ length: 10 }, (_, i): [number, 'H', number] => [hAgo(20 + i), 'H', i]),
+      [hAgo(11.5), 'N', 20], [hAgo(11), 'T', 21], [hAgo(9), 'T', 22], [hAgo(4.5), 'T', 23],
+    ];
+    const e = reason(history);
+    expect(e.eligible).toBe(false);
+    expect(e.reason).toContain('newer beacon/telemetry-only report (mixed evidence)');
+  });
+  it('never describes reports as outvoted or implies that a "Not Heard" report proves a failure', () => {
+    const bad = /outvot|fail|dead|broken|offline|inactive|not working|is off|unavailable/i;
+    for (const e of [noPositive, afterNotHeard, afterBeacon]) expect(e.reason).not.toMatch(bad);
+    // the longer explanation (shown in details) says the same thing
+    expect(afterNotHeard.status.explanation).toMatch(/mixed evidence, not proof the repeater is off/);
+    expect(afterNotHeard.status.explanation).not.toMatch(/not working/);
   });
 });
 
@@ -117,7 +158,7 @@ describe('operating-pattern classification: interruptible vs activation-required
   });
   it('ISS still needs recent positive evidence: no recent report, or a newer negative, excludes it', () => {
     expect(byName(only('ISS_[FM]', []))['ISS']!.eligible).toBe(false);
-    expect(byName(only('ISS_[FM]', [[hAgo(1), 'N', 0], [hAgo(4), 'H', 1]]))['ISS']!.reason).toMatch(/newest FM report was negative/);
+    expect(byName(only('ISS_[FM]', [[hAgo(1), 'N', 0], [hAgo(4), 'H', 1]]))['ISS']!.reason).toMatch(/followed by a newer “Not Heard” report/);
     expect(planWith(only('ISS_[FM]', []), 25544).windows).toEqual([]);
   });
 

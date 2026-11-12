@@ -77,6 +77,8 @@ export interface OperationalStatus {
   notHeard: number;
   /** Of the negatives: "Telemetry Only" (the beacon was heard, so the repeater is not shown to work). */
   beaconOnly: number;
+  /** Kind of the NEWEST contrary report in the window (wording only; never changes eligibility). */
+  newestNegative?: 'not-heard' | 'beacon-only' | null;
   windowHours: number;
   /** When the status data was downloaded (ISO), or null if there is no status data. */
   dataDownloadedAt: string | null;
@@ -106,7 +108,7 @@ export const DETAIL_LABELS: Record<StatusDetail, string> = {
  * Deliberately worded as missing EVIDENCE, never as proof that the repeater is off.
  * Lowercase fragment with no trailing period, so callers can build "NAME: <reason>."
  */
-export function exclusionReason(s: Pick<OperationalStatus, 'state' | 'detail' | 'windowHours'>): string | null {
+export function exclusionReason(s: Pick<OperationalStatus, 'state' | 'detail' | 'windowHours' | 'newestNegative'>): string | null {
   if (s.state === 'recently-reported-active') return null;
   const base = `no qualifying FM report in the last ${s.windowHours} hours`;
   switch (s.detail) {
@@ -114,8 +116,16 @@ export function exclusionReason(s: Pick<OperationalStatus, 'state' | 'detail' | 
       return 'requires a confirmed activation window covering the pass, and none is available (a recent report alone does not qualify it)';
     case 'no-data':
       return 'status data unavailable, so eligibility cannot be established';
-    case 'mixed':
-      return `${base} (the newest FM report was negative)`;
+    case 'mixed': {
+      // Mixed/contrary evidence: recent positive reports, then a newer contrary one. A "Not Heard" report says one
+      // listener did not hear the repeater; it is not proof of failure. Beacon/telemetry-only says the beacon was
+      // heard, which does not show the FM repeater works. Either way the older positives are not treated as current.
+      const newer =
+        s.newestNegative === 'not-heard' ? 'a newer “Not Heard” report'
+        : s.newestNegative === 'beacon-only' ? 'a newer beacon/telemetry-only report'
+        : 'a newer contrary report';
+      return `recent positive FM reports were followed by ${newer} (mixed evidence), so they are not treated as current evidence`;
+    }
     case 'not-heard':
     case 'confirmed-unavailable':
       return `${base} (only negative reports)`;
@@ -192,6 +202,7 @@ function classifyReports(
   let beaconOnly = 0;
   let lastPos: Ms | null = null;
   let lastNeg: Ms | null = null;
+  let newestNegative: 'not-heard' | 'beacon-only' | null = null; // wording only
   const negCallers = new Set<number>();
   for (const [sec, code, caller] of entry.reports) {
     const t = sec * 1000;
@@ -203,12 +214,13 @@ function classifyReports(
       if (code === 'N') notHeard++;
       else beaconOnly++;
       negCallers.add(caller);
+      if (lastNeg === null || t > lastNeg) newestNegative = code === 'N' ? 'not-heard' : 'beacon-only';
       lastNeg = lastNeg === null ? t : Math.max(lastNeg, t);
     }
     // 'C' (ISS crew voice active) says nothing about the FM repeater and is ignored.
   }
   const negatives = notHeard + beaconOnly;
-  const counts = { lastPositiveMs: lastPos, lastNegativeMs: lastNeg, positives, negatives, notHeard, beaconOnly };
+  const counts = { lastPositiveMs: lastPos, lastNegativeMs: lastNeg, positives, negatives, notHeard, beaconOnly, newestNegative };
   const negText = `${notHeard} "not heard"${beaconOnly ? ` and ${beaconOnly} "beacon only"` : ''}`;
 
   if (positives > 0 && (lastNeg === null || (lastPos !== null && lastPos > lastNeg))) {
@@ -225,7 +237,7 @@ function classifyReports(
   if (positives > 0) {
     return unconfirmed(
       'mixed',
-      `Mixed reports in the last ${windowHours} hours: ${positives} heard, ${negText}, and the newest says it was not working. It may be on only part of the time.`,
+      `Mixed reports in the last ${windowHours} hours: ${positives} heard and ${negText}, with a newer contrary report. That is mixed evidence, not proof the repeater is off, so the earlier reports are not treated as current.`,
       counts,
     );
   }
