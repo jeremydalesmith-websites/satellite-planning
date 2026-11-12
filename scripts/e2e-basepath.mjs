@@ -31,7 +31,7 @@ const since = (mark) => all.slice(mark);
 
 async function loadsApp(url, label) {
   await page.goto(url);
-  await page.waitForSelector('text=Find available event windows', { timeout: 20000 });
+  await page.waitForSelector('text=Find event windows', { timeout: 20000 });
   check(`${label}: app renders`, true);
 }
 
@@ -63,7 +63,7 @@ check('navigation to Saved events works', (await page.locator('article.saved').c
 await page.click('button.tab:has-text("Plan")');
 m = all.length;
 await page.reload();
-await page.waitForSelector('text=Find available event windows');
+await page.waitForSelector('text=Find event windows');
 check('reload re-fetches data from under the prefix', since(m).some((u) => u.endsWith(prefix + 'data/elements.json')));
 check('saved preferences survive reload', (await page.inputValue('input[placeholder="e.g. 42.35"]')) === '42.0');
 await page.click('button.tab:has-text("Saved events")');

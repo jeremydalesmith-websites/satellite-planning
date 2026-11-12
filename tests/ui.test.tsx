@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { emptyAvailability } from '../src/availability/availability.ts';
@@ -96,15 +96,59 @@ describe('plan form', () => {
     expect(within(alert).getByText(/Select when you are available/)).toBeTruthy();
     expect(onSearch).not.toHaveBeenCalled();
   });
-  it('defaults: 40°, 3 opportunities, 28-day range, browser timezone visible and editable', () => {
+  it('defaults: 40°, 3 opportunities, 28-day range, browser time zone shown on a compact line and editable via Change', async () => {
     render(<PlanForm busy={false} onSearch={() => {}} />);
     expect((screen.getByLabelText(/Minimum peak elevation/) as HTMLInputElement).value).toBe('40');
     expect((screen.getByLabelText(/Opportunities needed/) as HTMLInputElement).value).toBe('3');
-    const tz = screen.getByLabelText('Time zone') as HTMLInputElement;
-    expect(tz.value).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
-    const from = (screen.getByLabelText('Search from') as HTMLInputElement).value;
-    const to = (screen.getByLabelText('through') as HTMLInputElement).value;
+    const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    expect(screen.getByText(/^Times:/).textContent).toContain(browserTz);
+    expect(screen.queryByLabelText('Time zone')).toBeNull(); // the editable control is hidden until "Change"
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    expect((screen.getByLabelText('Time zone') as HTMLInputElement).value).toBe(browserTz);
+    const from = (screen.getByLabelText('Start date') as HTMLInputElement).value;
+    const to = (screen.getByLabelText('End date') as HTMLInputElement).value;
     expect((Date.parse(to) - Date.parse(from)) / 86_400_000).toBe(27); // 28 inclusive days
+  });
+  it('a saved time zone is preserved and shown; the browser zone is only the default when nothing is saved', () => {
+    savePrefs({ latText: '', lonText: '', timeZone: 'Pacific/Auckland', minElevationText: '40', durationMin: 150, minOpportunitiesText: '3', availability: emptyAvailability() });
+    render(<PlanForm busy={false} onSearch={() => {}} />);
+    expect(screen.getByText(/^Times:/).textContent).toContain('Pacific/Auckland');
+  });
+  it('the removed explanatory text is gone, the dates use a dash with accessible labels, and nothing claims the zone comes from coordinates', () => {
+    const { container } = render(<PlanForm busy={false} onSearch={() => {}} />);
+    const text = container.textContent ?? '';
+    for (const gone of [
+      'Find available event windows with multiple FM satellite passes',
+      'Planning only: this finds clusters',
+      'Your location is never guessed',
+      'Up to 42 days. Dates more than a week',
+      'Search from',
+    ]) expect(text).not.toContain(gone);
+    expect(screen.getByText('Dates')).toBeTruthy();
+    expect(screen.getByLabelText('Start date')).toBeTruthy();
+    expect(screen.getByLabelText('End date')).toBeTruthy();
+    expect(text).toContain('–');
+    expect(text).not.toMatch(/coordinates.*time ?zone|time ?zone.*(from|detected|determined).*(coordinates|location)/i);
+  });
+  it('invalid ranges and the 42-day limit are reported as errors, and only when relevant', async () => {
+    const onSearch = vi.fn();
+    render(<PlanForm busy={false} onSearch={onSearch} />);
+    expect(screen.queryByText(/at most 42 days/)).toBeNull(); // no permanent explanatory text
+    fireEvent.change(screen.getByLabelText('Start date'), { target: { value: '2027-01-01' } });
+    fireEvent.change(screen.getByLabelText('End date'), { target: { value: '2027-03-15' } }); // 74 days
+    await userEvent.click(screen.getByRole('button', { name: 'Find event windows' }));
+    expect(within(screen.getByRole('alert')).getByText(/at most 42 days/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('End date'), { target: { value: '2026-12-01' } }); // before the start
+    expect(within(screen.getByRole('alert')).getByText(/end date must not be before the start date/i)).toBeTruthy();
+    expect(onSearch).not.toHaveBeenCalled();
+  });
+  it('an invalid time zone reveals the time zone field with its error, without clicking Change', async () => {
+    savePrefs({ latText: '', lonText: '', timeZone: 'Not/AZone', minElevationText: '40', durationMin: 150, minOpportunitiesText: '3', availability: emptyAvailability() });
+    render(<PlanForm busy={false} onSearch={() => {}} />);
+    expect(screen.queryByLabelText('Time zone')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Find event windows' }));
+    expect(screen.getByLabelText(/^Time zone/)).toBeTruthy();
+    expect(screen.getAllByText(/valid time zone name/).length).toBeGreaterThan(0);
   });
   it('calls onSearch with parsed inputs when valid, and persists preferences locally', async () => {
     const onSearch = vi.fn();

@@ -19,7 +19,7 @@ page.on('requestfailed', (r) => problems.push(`requestfailed: ${r.url()}`));
 page.on('response', (r) => { if (r.status() >= 400) problems.push(`HTTP ${r.status()}: ${r.url()}`); });
 
 await page.goto(url);
-await page.waitForSelector('text=Find available event windows');
+await page.waitForSelector('text=Find event windows');
 
 // 1. validation with nothing filled in
 await page.click('text=Find event windows');

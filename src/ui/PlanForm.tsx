@@ -59,6 +59,8 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
   const toggle = (id: number) => setChosen(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
   const [submitted, setSubmitted] = useState(false);
   const [geoMsg, setGeoMsg] = useState<string | null>(null);
+  // The time zone is a compact line until the user asks to change it (or it is invalid, so the error has a field).
+  const [tzOpen, setTzOpen] = useState(false);
   const zones = useMemo(zoneList, []);
 
   // Persist preferences locally (location included: it never leaves this browser).
@@ -105,11 +107,7 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
   const errList = submitted ? errors : [];
 
   return (
-    <form className="card plan-form" onSubmit={submit} noValidate aria-labelledby="plan-title">
-      <h2 id="plan-title">Find available event windows with multiple FM satellite passes.</h2>
-      <p className="hint">
-        Planning only: this finds clusters of usable passes inside the times you are free. It does not track satellites live.
-      </p>
+    <form className="card plan-form" onSubmit={submit} noValidate aria-label="Plan an event">
 
       {errList.length > 0 && (
         <div className="error-summary" role="alert" id="error-summary">
@@ -137,26 +135,15 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
           </label>
         </div>
         <button type="button" className="secondary" onClick={locate}>Use my current location</button>
-        <p className="hint small" role="status">{geoMsg ?? 'Your location is never guessed. It is used only for the calculation and saved in this browser, not sent anywhere.'}</p>
+        {geoMsg && <p className="hint small" role="status">{geoMsg}</p>}
       </fieldset>
 
       <fieldset>
-        <legend>Dates and time zone</legend>
-        <label>
-          Time zone
-          <input list="zones" value={f.timeZone} onChange={(e) => set('timeZone', e.target.value)} aria-invalid={!!err('timeZone')} aria-describedby="tz-err" autoComplete="off" spellCheck={false} />
-          <datalist id="zones">{zones.map((z) => <option key={z} value={z} />)}</datalist>
-          <span className="field-err" id="tz-err">{err('timeZone')?.message}</span>
-        </label>
-        <div className="row two">
-          <label>
-            Search from
-            <input type="date" value={f.startDate} onChange={(e) => set('startDate', e.target.value)} />
-          </label>
-          <label>
-            through
-            <input type="date" value={f.endDate} onChange={(e) => set('endDate', e.target.value)} aria-invalid={!!err('endDate')} aria-describedby="end-err" />
-          </label>
+        <legend>Dates</legend>
+        <div className="date-range">
+          <input type="date" aria-label="Start date" value={f.startDate} onChange={(e) => set('startDate', e.target.value)} aria-invalid={!!err('endDate')} aria-describedby="end-err" />
+          <span className="dash" aria-hidden="true">–</span>
+          <input type="date" aria-label="End date" value={f.endDate} onChange={(e) => set('endDate', e.target.value)} aria-invalid={!!err('endDate')} aria-describedby="end-err" />
         </div>
         <span className="field-err" id="end-err">{err('endDate')?.message}</span>
         <div className="chips" role="group" aria-label="Quick date range">
@@ -164,7 +151,23 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
             <button type="button" className="chip" key={n} onClick={() => setRange(n)}>{n} days</button>
           ))}
         </div>
-        <p className="hint small">Up to {MAX_SEARCH_DAYS} days. Dates more than a week or so beyond the orbital data are shown as tentative or provisional.</p>
+        {/* Time zone: the browser's zone unless the user saved another. Not derived from the coordinates. */}
+        <p className="tz-line">
+          Times: <strong>{f.timeZone || 'unset'}</strong> ·{' '}
+          <button type="button" className="link" aria-expanded={tzOpen || !!err('timeZone')} aria-controls="tz-field" onClick={() => setTzOpen((o) => !o)}>
+            Change
+          </button>
+        </p>
+        {(tzOpen || !!err('timeZone')) && (
+          <div id="tz-field">
+            <label>
+              Time zone
+              <input list="zones" value={f.timeZone} onChange={(e) => set('timeZone', e.target.value)} aria-invalid={!!err('timeZone')} aria-describedby="tz-err" autoComplete="off" spellCheck={false} />
+              <datalist id="zones">{zones.map((z) => <option key={z} value={z} />)}</datalist>
+              <span className="field-err" id="tz-err">{err('timeZone')?.message}</span>
+            </label>
+          </div>
+        )}
       </fieldset>
 
       <fieldset>
