@@ -182,15 +182,21 @@ describe('data freshness: a compact status-age indicator, judged from the STATUS
 });
 
 describe('page heading', () => {
-  it('shows "Satellite Pass Planner" with the new subtitle', async () => {
+  it('shows "Satellite Pass Planner by K1KFX" as the page title, with the subtitle', async () => {
     vi.stubGlobal('fetch', vi.fn(async (u: URL | string) => {
       const files: Record<string, unknown> = { 'elements.json': elementsFixture, 'status.json': status() };
       const key = Object.keys(files).find((k) => String(u).endsWith(k));
       return new Response(key ? JSON.stringify(files[key]) : 'nope', { status: key ? 200 : 404, headers: { 'content-type': 'application/json' } });
     }));
     const { container } = render(<App />);
-    expect(container.querySelector('h1')!.textContent).toBe('Satellite Pass Planner');
+    expect(container.querySelector('h1')!.textContent).toBe('Satellite Pass Planner by K1KFX');
     expect(container.querySelector('.subtitle')!.textContent).toBe('Find FM satellite pass clusters for your next club event.');
     await screen.findByText('Data and timing'); // let the data load settle before the test ends
+  });
+  it('the browser tab title (index.html) is "Satellite Pass Planner"', async () => {
+    const { readFileSync } = await import('node:fs');
+    const html = readFileSync('index.html', 'utf8');
+    expect(html).toContain('<title>Satellite Pass Planner</title>');
+    expect(html).not.toContain('FM Satellite Event Planner');
   });
 });

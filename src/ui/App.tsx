@@ -132,7 +132,7 @@ export function App() {
     <div className="app">
       <header className="top">
         <div className="brand">
-          <h1>Satellite Pass Planner</h1>
+          <h1>Satellite Pass Planner by K1KFX</h1>
           <p className="subtitle">Find FM satellite pass clusters for your next club event.</p>
         </div>
         <nav aria-label="Sections">
