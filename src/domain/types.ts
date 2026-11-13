@@ -63,5 +63,6 @@ export interface Criteria {
    * among the counted passes, gaps included. It is a limit, not a required or padded event duration.
    */
   maxSpanMin: number;
+  /** Minimum passes. 1 = single-pass mode (each qualifying pass is its own result; the maximum span is ignored). */
   minOpportunities: number;
 }

@@ -58,6 +58,7 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
   const selected: readonly number[] = chosen ?? DEFAULT_SELECTED_NORAD_IDS;
   const toggle = (id: number) => setChosen(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
   const [submitted, setSubmitted] = useState(false);
+  const singlePass = Number(f.minOpportunitiesText.trim()) === 1; // minimum passes = 1: single-pass mode
   const [geoMsg, setGeoMsg] = useState<string | null>(null);
   // The time zone is a compact line until the user asks to change it (or it is invalid, so the error has a field).
   const [tzOpen, setTzOpen] = useState(false);
@@ -187,20 +188,25 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
             <span className="field-err" id="el-err">{err('minElevationText')?.message}</span>
           </label>
           <label>
-            Opportunities needed
+            Minimum passes
             <input inputMode="numeric" value={f.minOpportunitiesText} onChange={(e) => set('minOpportunitiesText', e.target.value)} aria-invalid={!!err('minOpportunitiesText')} aria-describedby="opp-err" />
             <span className="field-err" id="opp-err">{err('minOpportunitiesText')?.message}</span>
           </label>
         </div>
-        <span className="seg-label" id="span-label">Maximum span</span>
-        <div className="seg" role="radiogroup" aria-labelledby="span-label">
-          {EVENT_DURATIONS_MIN.map((m) => (
-            <label key={m} className={f.durationMin === m ? 'on' : ''}>
-              <input type="radio" name="dur" checked={f.durationMin === m} onChange={() => set('durationMin', m)} />
-              {m / 60} hours
-            </label>
-          ))}
-        </div>
+        {/* With 1 minimum pass every pass is its own result, so there is no cluster for a span to constrain. */}
+        {!singlePass && (
+          <>
+            <span className="seg-label" id="span-label">Maximum span</span>
+            <div className="seg" role="radiogroup" aria-labelledby="span-label">
+              {EVENT_DURATIONS_MIN.map((m) => (
+                <label key={m} className={f.durationMin === m ? 'on' : ''}>
+                  <input type="radio" name="dur" checked={f.durationMin === m} onChange={() => set('durationMin', m)} />
+                  {m / 60} hours
+                </label>
+              ))}
+            </div>
+          </>
+        )}
       </fieldset>
 
       <SatellitePicker eligibility={eligibility} selected={selected} onToggle={toggle} />

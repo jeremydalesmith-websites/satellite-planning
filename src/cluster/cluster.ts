@@ -16,11 +16,15 @@
  * double-counted. Overlapping qualifying passes inside the cluster are listed as alternatives, not hidden.
  * This is conservative: two passes that overlap only at low elevation are not counted together.
  *
+ * SINGLE-PASS MODE (minimum passes = 1): there is no cluster to build, so every qualifying pass is its own result (its own
+ * AOS-to-LOS is the window), ranked by maximum elevation, highest first, with the earlier AOS breaking ties. The maximum
+ * span does not apply. All other rules (selection by peak, sunlight, eligibility, availability fit) are unchanged.
+ *
  * Ranking of clusters: (1) number of passes, (2) total operating time, (3) sum of maximum elevations,
  * (4) earlier start. Exact duplicates (same counted passes) are removed. A shorter cluster with fewer passes is a
  * distinct set and is kept; the display limit applies.
  */
-import { RESULT_LIMIT, SAVED_EDGE_TOLERANCE_SEC } from '../domain/policy.ts';
+import { RESULT_LIMIT, SAVED_EDGE_TOLERANCE_SEC, SINGLE_PASS_RESULT_LIMIT } from '../domain/policy.ts';
 import { contains } from '../domain/intervals.ts';
 import type { Interval } from '../domain/types.ts';
 import type { PassAssessment } from '../eligibility/assess.ts';
@@ -171,7 +175,7 @@ function clusterDetail(counted: PassAssessment[], all: readonly PassAssessment[]
   return summarize(window, counted, alternatives, [], excluded);
 }
 
-/** A search result: one cluster. */
+/** A search result: one cluster (or, in single-pass mode, one pass). */
 export type EventWindow = WindowEvaluation;
 
 function compareClusters(a: WindowEvaluation, b: WindowEvaluation): number {
@@ -191,6 +195,27 @@ export interface FindOptions {
 }
 
 /**
+ * Every qualifying pass as its own result (single-pass mode), highest maximum elevation first. The elevation ranked is the
+ * highest reached while operation is permitted (equal to the pass maximum except for a sunlight-limited pass), so a pass is
+ * never ranked by an elevation the operator cannot use. Ties: earlier AOS, then pass id, for a stable order.
+ * A pass counts only if its whole AOS-to-LOS lies inside one availability block, like any other cluster.
+ */
+export function findSinglePasses(all: readonly PassAssessment[], availability: readonly Interval[]): EventWindow[] {
+  const seen = new Set<string>();
+  const out: EventWindow[] = [];
+  for (const block of availability) {
+    for (const a of all) {
+      if (a.verdict !== 'eligible' || a.operatingIntervals.length === 0 || seen.has(a.passId)) continue;
+      if (a.riseMs < block.start || a.setMs > block.end) continue;
+      seen.add(a.passId);
+      out.push(summarize({ start: a.riseMs, end: a.setMs }, [a], [], [], []));
+    }
+  }
+  const elevation = (w: WindowEvaluation) => w.counted[0]!.eligibleMaxElevationDeg ?? w.counted[0]!.fullMaxElevationDeg;
+  return out.sort((x, y) => elevation(y) - elevation(x) || x.window.start - y.window.start || x.counted[0]!.passId.localeCompare(y.counted[0]!.passId));
+}
+
+/**
  * Find ranked clusters.
  * @param availability normalized absolute intervals (the ONLY availability input). Each cluster's full
  *   AOS-to-LOS envelope must lie inside ONE of them.
@@ -200,6 +225,7 @@ export function findEventWindows(
   availability: readonly Interval[],
   opts: FindOptions,
 ): EventWindow[] {
+  if (opts.minOpportunities <= 1) return findSinglePasses(all, availability).slice(0, opts.limit ?? SINGLE_PASS_RESULT_LIMIT);
   const span = opts.maxSpanMin * 60_000;
   const eligible = all.filter((a) => a.verdict === 'eligible' && a.operatingIntervals.length > 0);
 

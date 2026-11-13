@@ -49,8 +49,8 @@ export function validateForm(f: FormFields, nowMs: Ms): { inputs: PlanInputs | n
     add('minElevationText', `Use a minimum elevation between ${MIN_ELEVATION_INPUT_DEG}° and ${MAX_ELEVATION_INPUT_DEG}°.`);
 
   const minOpp = parseNumber(f.minOpportunitiesText);
-  if (minOpp === null || !Number.isInteger(minOpp) || minOpp < 2 || minOpp > 10)
-    add('minOpportunitiesText', 'Choose a whole number of opportunities from 2 to 10.');
+  if (minOpp === null || !Number.isInteger(minOpp) || minOpp < 1 || minOpp > 10)
+    add('minOpportunitiesText', 'Choose a whole number of passes from 1 to 10.');
 
   const availErrors = validateAvailability(f.availability);
   availErrors.forEach((m) => add('availability', m));

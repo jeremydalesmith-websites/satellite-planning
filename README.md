@@ -78,7 +78,7 @@ the stated limitation or only partial automated coverage; **Not yet** = delibera
 | 2d | Scheduled GitHub Actions data refresh | **Not yet** | `scripts/refresh-data.ts` works by hand | No workflow in this phase (Phase 3, needs approval) |
 | 2e | No Firebase/DB/auth/paid API/LLM; no secrets in frontend | Done | code review | The refresh script sends a generic User-Agent |
 | 3 | FM repeaters only, 2 m/70 cm cross-band, V/U and U/V; extensible internal model | Done | `planner` (catalog) | `ActivityKind` has one value today; SSTV etc. deliberately not built |
-| 4 | Inputs: location (manual + optional button), timezone, date range, min peak elevation, maximum cluster span, min opportunities, validation | Done* | `ui` (validation, defaults, geolocation never called unprompted), `availability` | Real browser geolocation not tested; minimum opportunities accepts 2 to 10 (not 1); elevation limited to 5 to 85 degrees |
+| 4 | Inputs: location (manual + optional button), timezone, date range, min peak elevation, maximum cluster span, minimum passes (1 to 10), validation | Done* | `ui` (validation, defaults, geolocation never called unprompted), `availability` | Real browser geolocation not tested; minimum passes accepts 1 to 10; elevation limited to 5 to 85 degrees |
 | 5 | Weekly Sun-Sat x Morning/Midday/Evening grid; editable boundaries; merge adjacent; the whole cluster must fit; explicit selection; accessible | Done* | `availability`, `ui` | Periods cannot cross midnight; touch usability not tested on real phones; a period boundary inside a spring-forward gap snaps to the moment the clocks jump |
 | 6 | Local SGP4 predictions with refined rise/peak/set/threshold/eclipse; three timestamps; Worker | Done | `predict` (vs 1 s brute force), `docs/VALIDATION.md` (vs Skyfield) | No confidence intervals (intended); observer height fixed at 0; no terrain mask; eclipse boundaries are sampled every 5 s, so a shadow shorter than 5 s inside one pass could be missed (none found in 5,028 real passes) |
 | 7a | Curated catalog in three separate layers with sources | Done* | `planner` (catalog) | Frequencies/restrictions are hand-copied from one AMSAT page dated 2026-10-31. "Status timestamp/explanation" is held per restriction (`asOf`, text) plus a catalog-wide review date, not as per-satellite fields |
@@ -251,6 +251,12 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
   `shadowFraction`), never local daylight. A night-time event can have a lit
   satellite. Any penumbra counts as not lit. Only AO-91 is flagged
   sunlight-dependent, because AMSAT's FM page asks for no use in eclipse.
+* **Single-pass mode (Minimum passes = 1).** There is no cluster to build, so every qualifying pass is its own result,
+  ranked by maximum elevation (highest first; the earlier pass wins a tie). A sunlight-limited pass is ranked by the
+  elevation it can be operated at, not by a peak in shadow. The maximum span is hidden, because it has nothing to
+  constrain. Every other rule is unchanged: selection by peak elevation (including 60° and higher), sunlight, strict
+  eligibility, the satellite selection, and the whole pass lying inside one availability block. Up to 100 passes are
+  shown, and the page says when more exist. With 2 or more minimum passes the cluster behaviour below applies as before.
 * **Cluster.** A cluster is a set of counted passes. Its start is the earliest full-pass AOS and its end the
   latest full-pass LOS among them (by timestamp), so its duration is the elapsed time between those endpoints,
   gaps included. Nothing is padded and there are no setup, arrival or departure buffers. The header shows exactly
@@ -259,7 +265,7 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
   pass shows its own "Duration".
 * **Maximum span.** The selected 2 / 2.5 / 3 hours is a *limit*, not a required or padded event length:
   a 20-minute cluster qualifies for a two-hour maximum. The cluster's span (AOS to LOS) must not exceed it.
-* **Availability.** The whole AOS-to-LOS cluster must lie inside one merged availability block (Midday +
+* **Availability.** (A **Weekend** shortcut in the grid header selects Saturday and Sunday in all three periods and clears Monday to Friday; it changes nothing else.) The whole AOS-to-LOS cluster must lie inside one merged availability block (Midday +
   Evening merge into one block). A pass that begins before or ends after the block does not count, even if
   its peak is inside. Period boundaries are local wall-clock times in the selected zone, converted per day with
   Luxon, so DST is handled. A boundary that falls in the repeated hour of a fall-back day takes the earlier instant,

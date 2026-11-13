@@ -9,8 +9,8 @@ passes are counted, the policy constants, the data sources and the limits.
 ## Agreed scope (do not expand without explicit approval)
 In scope: FM repeaters only, cross-band 2 m / 70 cm, both V/U and U/V; location,
 timezone, date range (default 28 days, max 42), minimum peak elevation
-(default 40°), maximum cluster span (2 / 2.5 / 3 h), minimum opportunities (default 3,
-2 allowed), weekly Sun–Sat × Morning/Midday/Evening availability; cluster
+(default 40°), maximum cluster span (2 / 2.5 / 3 h), minimum passes (default 3,
+1 to 10; 1 = single-pass mode, where each qualifying pass is its own result ranked by maximum elevation and the maximum span is hidden), weekly Sun–Sat × Morning/Midday/Evening availability; cluster
 finder and ranking; saved events re-checked against fresh data.
 
 Out of scope (deferred): SSTV, linear transponders, packet/APRS/telemetry/beacon

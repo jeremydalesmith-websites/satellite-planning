@@ -38,7 +38,7 @@ describe('results lead straight into the event cards', () => {
       expect(text).not.toContain(label);
     }
     expect(container.querySelector('dl.fresh')).toBeNull();
-    expect(screen.getByText(/promising event window/)).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toMatch(/qualifying pass/); // this fixture uses 1 minimum pass: single-pass mode
   });
   it('does not repeat a provisional-planning paragraph on any event card (the one note lives in the footer)', () => {
     const { container } = renderResults(T0);

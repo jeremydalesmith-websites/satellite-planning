@@ -25,18 +25,32 @@ export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem 
   const statusAt = result.meta.statusDownloadedAt ? Date.parse(result.meta.statusDownloadedAt) : null;
   const statusAgeHours = statusAt === null ? null : Math.max(0, nowMs - statusAt) / 3_600_000;
   const diagCount = excluded.length + result.skipped.length;
+  const single = criteria.minOpportunities <= 1; // single-pass mode: each pass is its own result
 
   return (
     <section aria-labelledby="results-title" className="results">
       <h2 id="results-title" tabIndex={-1}>
-        {windows.length > 0
-          ? `${windows.length} promising event window${windows.length === 1 ? '' : 's'}`
-          : 'No qualifying event windows'}
+        {single
+          ? result.windowsTotal > 0
+            ? `${result.windowsTotal} qualifying pass${result.windowsTotal === 1 ? '' : 'es'}`
+            : 'No qualifying passes'
+          : windows.length > 0
+            ? `${windows.length} promising event window${windows.length === 1 ? '' : 's'}`
+            : 'No qualifying event windows'}
       </h2>
       <p className="hint">
-        Clusters of at least {criteria.minOpportunities} separate passes, each reaching a peak of {criteria.minElevationDeg}° or higher, with every full pass (rise to set) inside your availability and within a maximum span of {criteria.maxSpanMin / 60} hours.
+        {single ? (
+          <>
+            Single passes reaching a peak of {criteria.minElevationDeg}° or higher, with the whole pass (rise to set) inside your availability, ranked by maximum elevation (highest first; earlier first on a tie).
+          </>
+        ) : (
+          <>
+            Clusters of at least {criteria.minOpportunities} separate passes, each reaching a peak of {criteria.minElevationDeg}° or higher, with every full pass (rise to set) inside your availability and within a maximum span of {criteria.maxSpanMin / 60} hours.
+          </>
+        )}
         {' '}Satellites considered: <strong>{considered.length ? considered.join(', ') : 'none (no selected satellite currently qualifies)'}</strong>.
       </p>
+      {single && windows.length < result.windowsTotal && <p className="hint small">Showing the highest {windows.length} of {result.windowsTotal}.</p>}
 
       {statusAt !== null && statusAgeHours !== null && statusAgeHours <= STATUS_AGE_NOTICE_HOURS && (
         <p className="hint small status-age">Status updated {fmtAgo(statusAt, nowMs)}.</p>
@@ -68,10 +82,17 @@ export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem 
             {diagnosis.availabilityBlocks > 0 && diagnosis.eligiblePasses > 0 && diagnosis.blocksHoldingAPass === 0 && (
               <li>None of your available time blocks can hold a whole qualifying pass from rising to setting (about 10 to 15 minutes). Tick longer or adjacent periods so they merge into longer blocks.</li>
             )}
-            {considered.length > 0 && (
+            {considered.length > 0 && !single && (
               <li>
                 {diagnosis.eligiblePasses} qualifying pass{diagnosis.eligiblePasses === 1 ? '' : 'es'} reach a peak of {criteria.minElevationDeg}° in your search.
                 No cluster within a {criteria.maxSpanMin / 60}-hour maximum span, entirely inside your availability, holds {criteria.minOpportunities} separate, non-overlapping ones.
+              </li>
+            )}
+            {considered.length > 0 && single && (
+              <li>
+                {diagnosis.eligiblePasses === 0
+                  ? `No pass of a selected, eligible satellite reaches a peak of ${criteria.minElevationDeg}° in these dates.`
+                  : `${diagnosis.eligiblePasses} qualifying pass${diagnosis.eligiblePasses === 1 ? '' : 'es'} reach a peak of ${criteria.minElevationDeg}°, but none lies entirely inside your availability.`}
               </li>
             )}
           </ul>

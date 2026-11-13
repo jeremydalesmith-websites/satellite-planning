@@ -62,6 +62,8 @@ export const SUNLIT_SHADOW_FRACTION_BELOW = 0.01;
 
 /** Maximum number of clusters shown. */
 export const RESULT_LIMIT = 25;
+/** In single-pass mode (minimum passes = 1) up to this many passes are shown, highest first; the page says if more exist. */
+export const SINGLE_PASS_RESULT_LIMIT = 100;
 
 /**
  * A saved cluster interval is anchored exactly on a pass's AOS and LOS. Recomputing the same pass moves those instants

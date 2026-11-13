@@ -46,8 +46,12 @@ export function EventCard({ event: e, rank, tz, criteria, meta, saved, onSave }:
       </header>
 
       <p className="summary">
-        <span className="big">{e.counted.length}</span> qualifying passes{' '}
-        <span className="sep">·</span> <span className="big">{e.distinctSatellites}</span> satellite{e.distinctSatellites === 1 ? '' : 's'}
+        <span className="big">{e.counted.length}</span> qualifying pass{e.counted.length === 1 ? '' : 'es'}
+        {criteria.minOpportunities > 1 && (
+          <>
+            {' '}<span className="sep">·</span> <span className="big">{e.distinctSatellites}</span> satellite{e.distinctSatellites === 1 ? '' : 's'}
+          </>
+        )}
         {!ok && <span className="warn"> (below your minimum of {criteria.minOpportunities})</span>}
       </p>
 

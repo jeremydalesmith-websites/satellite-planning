@@ -62,7 +62,7 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
             <strong>{fmtStartMin(ev.window.start, tz)} – {fmtEndMin(ev.window.end, tz)}</strong> {tzAbbrev(ev.window.start, tz)} · {fmtSpanMin(ev.window.start, ev.window.end)}
           </p>
           <p className="hint small">
-            Needs {c.minOpportunities}+ passes peaking at {c.minElevationDeg}°+ · location {ev.location.latDeg.toFixed(2)}, {ev.location.lonDeg.toFixed(2)} · saved {fmtDateTime(ev.savedAtMs, tz)}
+            Needs {c.minOpportunities === 1 ? 'at least 1 pass' : `${c.minOpportunities}+ passes`} peaking at {c.minElevationDeg}°+ · location {ev.location.latDeg.toFixed(2)}, {ev.location.lonDeg.toFixed(2)} · saved {fmtDateTime(ev.savedAtMs, tz)}
           </p>
         </div>
         <button type="button" className="danger" onClick={onDelete}>Delete</button>

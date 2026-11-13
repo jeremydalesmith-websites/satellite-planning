@@ -13,7 +13,7 @@
 import { ACTIVITIES } from './catalog/catalog.ts';
 import type { FmActivity } from './catalog/catalog.ts';
 import type { ElementsFile, StatusFile } from './data/ingest.ts';
-import { EVENT_DURATIONS_MIN, MAX_ELEMENT_AGE_DAYS, MIN_ELEVATION_INPUT_DEG } from './domain/policy.ts';
+import { EVENT_DURATIONS_MIN, MAX_ELEMENT_AGE_DAYS, MIN_ELEVATION_INPUT_DEG, SINGLE_PASS_RESULT_LIMIT } from './domain/policy.ts';
 import type { Criteria, ElementSet, Interval, Ms, Observer, PassGeometry } from './domain/types.ts';
 import { expandAvailability } from './availability/availability.ts';
 import type { AvailabilitySettings } from './availability/availability.ts';
@@ -23,7 +23,7 @@ import { classifyStatus } from './eligibility/status.ts';
 import { consideredIds, evaluateEligibility } from './eligibility/eligibility.ts';
 import type { SatelliteEligibility } from './eligibility/eligibility.ts';
 import type { OperationalStatus } from './eligibility/status.ts';
-import { findEventWindows } from './cluster/cluster.ts';
+import { findEventWindows, findSinglePasses } from './cluster/cluster.ts';
 import type { EventWindow } from './cluster/cluster.ts';
 
 export interface LoadedData {
@@ -139,6 +139,8 @@ export interface PlanResult {
   /** Satellites that were both eligible and selected, i.e. the only ones that can appear below. */
   consideredNoradIds: number[];
   windows: EventWindow[];
+  /** How many results exist before the display limit (only differs from windows.length in single-pass mode). */
+  windowsTotal: number;
   assessments: PassAssessment[];
   availabilityIntervals: Interval[];
   skipped: SkippedSatellite[];
@@ -176,7 +178,9 @@ export function computePlan(
   const planned = passes.filter((p) => considered.has(p.noradId));
   const assessments = assessAll(planned, statuses, criteria.minElevationDeg);
   const availabilityIntervals = range.end > range.start ? expandAvailability(inputs.availability, inputs.timeZone, range) : [];
-  const windows = findEventWindows(assessments, availabilityIntervals, criteria);
+  const singlePass = criteria.minOpportunities <= 1;
+  const everyPass = singlePass ? findSinglePasses(assessments, availabilityIntervals) : null;
+  const windows = everyPass ? everyPass.slice(0, SINGLE_PASS_RESULT_LIMIT) : findEventWindows(assessments, availabilityIntervals, criteria);
   const diagnosis =
     windows.length === 0
       ? diagnose(effective, planned, statuses, assessments, availabilityIntervals)
@@ -185,6 +189,7 @@ export function computePlan(
     eligibility,
     consideredNoradIds: [...considered],
     windows,
+    windowsTotal: everyPass ? everyPass.length : windows.length,
     assessments,
     availabilityIntervals,
     skipped: skipped.filter((s) => considered.has(s.noradId)),
@@ -217,25 +222,27 @@ export function diagnose(
   const count = (as: readonly PassAssessment[], av: readonly Interval[], spanMin: number, min: number) =>
     findEventWindows(as, av, { maxSpanMin: spanMin, minOpportunities: min }).length;
   const eligible = assessments.filter((a) => a.verdict === 'eligible');
+  const single = criteria.minOpportunities <= 1;
+  const noun = (n: number) => (single ? `result${n === 1 ? '' : 's'}` : `cluster${n === 1 ? '' : 's'}`);
 
   if (criteria.minOpportunities > 2) {
     const n = count(assessments, blocks, criteria.maxSpanMin, criteria.minOpportunities - 1);
-    if (n > 0) suggestions.push({ kind: 'fewer-opportunities', windows: n, text: `Requiring ${criteria.minOpportunities - 1} passes instead of ${criteria.minOpportunities} would give ${n} cluster${n === 1 ? '' : 's'}.` });
+    if (n > 0) suggestions.push({ kind: 'fewer-opportunities', windows: n, text: `Requiring ${criteria.minOpportunities - 1} passes instead of ${criteria.minOpportunities} would give ${n} ${noun(n)}.` });
   }
   const lower = Math.max(MIN_ELEVATION_INPUT_DEG, criteria.minElevationDeg - 10);
   if (lower < criteria.minElevationDeg) {
     const lowAs = assessAll(passes, statuses, lower);
     const n = count(lowAs, blocks, criteria.maxSpanMin, criteria.minOpportunities);
-    if (n > 0) suggestions.push({ kind: 'lower-elevation', windows: n, text: `Lowering the minimum peak elevation to ${lower}° would give ${n} cluster${n === 1 ? '' : 's'}.` });
+    if (n > 0) suggestions.push({ kind: 'lower-elevation', windows: n, text: `Lowering the minimum peak elevation to ${lower}° would give ${n} ${noun(n)}.` });
   }
   const longest = Math.max(...EVENT_DURATIONS_MIN);
-  if (criteria.maxSpanMin < longest) {
+  if (!single && criteria.maxSpanMin < longest) {
     const n = count(assessments, blocks, longest, criteria.minOpportunities);
-    if (n > 0) suggestions.push({ kind: 'longer-span', windows: n, text: `A ${longest / 60}-hour maximum cluster span would give ${n} cluster${n === 1 ? '' : 's'}.` });
+    if (n > 0) suggestions.push({ kind: 'longer-span', windows: n, text: `A ${longest / 60}-hour maximum cluster span would give ${n} ${noun(n)}.` });
   }
   const everything: Interval[] = [inputs.range];
   const nAll = count(assessments, everything, criteria.maxSpanMin, criteria.minOpportunities);
-  if (nAll > 0) suggestions.push({ kind: 'more-availability', windows: nAll, text: `The passes exist (${nAll} cluster${nAll === 1 ? '' : 's'} at some hour), but not entirely inside your selected availability. Adding more days or periods would help.` });
+  if (nAll > 0) suggestions.push({ kind: 'more-availability', windows: nAll, text: `The passes exist (${nAll} ${noun(nAll)} at some hour), but not entirely inside your selected availability. Adding more days or periods would help.` });
 
   return {
     availabilityBlocks: blocks.length,

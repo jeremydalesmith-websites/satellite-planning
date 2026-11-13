@@ -225,3 +225,8 @@ footer .fresh { margin-top: 6px; }
   /* The narrowest phones: the native date control needs its full "MM/DD/YYYY" plus the calendar icon in ~108px. */
   .date-range input { padding-inline: 4px; font-size: .85rem; }
 }
+
+/* Weekend shortcut: its own row at the top of the grid header, directly above the per-day controls */
+.weekend-row { text-align: left !important; padding: 0 0 6px !important; }
+.weekend-btn { min-height: 30px; padding: 2px 8px; font-size: .78rem; line-height: 1.1; }
+.weekend-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }

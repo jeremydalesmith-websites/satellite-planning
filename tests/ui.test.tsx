@@ -36,7 +36,7 @@ describe('form validation messages', () => {
   it.each([
     [{ latText: '91' }, 'latText'], [{ latText: 'abc' }, 'latText'], [{ lonText: '-181' }, 'lonText'],
     [{ timeZone: 'Mars/Olympus' }, 'timeZone'], [{ minElevationText: '4' }, 'minElevationText'],
-    [{ minElevationText: '86' }, 'minElevationText'], [{ minOpportunitiesText: '1' }, 'minOpportunitiesText'],
+    [{ minElevationText: '86' }, 'minElevationText'], [{ minOpportunitiesText: '0' }, 'minOpportunitiesText'],
     [{ minOpportunitiesText: '2.5' }, 'minOpportunitiesText'], [{ endDate: '2027-03-01' }, 'endDate'],
   ] as const)('%j is rejected on %s', (patch, field) => {
     const r = validateForm({ ...good(), ...patch }, NOW);
@@ -167,7 +167,7 @@ describe('plan form', () => {
   it('defaults: 40°, 3 opportunities, 28-day range, browser time zone shown on a compact line and editable via Change', async () => {
     render(<PlanForm busy={false} onSearch={() => {}} />);
     expect((screen.getByLabelText(/Minimum peak elevation/) as HTMLInputElement).value).toBe('40');
-    expect((screen.getByLabelText(/Opportunities needed/) as HTMLInputElement).value).toBe('3');
+    expect((screen.getByLabelText(/^Minimum passes/) as HTMLInputElement).value).toBe('3');
     const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     expect(screen.getByText(/^Timezone:/).textContent).toContain(browserTz);
     expect(screen.queryByLabelText('Time zone')).toBeNull(); // the editable control is hidden until "Change"
