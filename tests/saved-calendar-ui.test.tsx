@@ -1,19 +1,19 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildCalendarExport } from '../src/export/ics.ts';
+import { buildGoogleCalendarUrl } from '../src/export/googleCalendar.ts';
 import type { PredictionMeta } from '../src/planner.ts';
 import { recheckSavedEvent } from '../src/saved/recheck.ts';
 import { isSavedEvent, snapshotEvent } from '../src/saved/saved.ts';
 import type { SavedEvent } from '../src/saved/saved.ts';
-import { downloadTextFile } from '../src/ui/download.ts';
 import { SavedEvents } from '../src/ui/SavedEvents.tsx';
 import { SO50, T0, assessed, at, iv } from './factory.ts';
 
 /**
- * "Add to calendar" on saved-event cards. The file is built from the event AS SAVED (saved times and details, never recalculated
- * ones); the only thing taken from the current re-check is a lost-eligibility warning, which goes at the top. No network, no
- * change to storage, and an unusable event shows a message instead of crashing.
+ * "Add to Google Calendar" on saved-event cards: an ordinary link that opens Google Calendar with the event prefilled. It is built
+ * from the event AS SAVED (saved times and details, never recalculated ones); the only thing taken from the current re-check is a
+ * lost-eligibility warning, which goes first in the description. No network, no change to storage, and an unusable event shows a
+ * message instead of a link.
  */
 vi.mock('../src/saved/recheck.ts', () => ({ recheckSavedEvent: vi.fn() }));
 const recheck = vi.mocked(recheckSavedEvent);
@@ -40,121 +40,70 @@ const okOutcome = (lost: Array<{ noradId: number; name: string; peakMs: number; 
   passed: false, nowMs: NOW, skippedNote: null, statusDownloadedAt: null,
 }) as unknown as ReturnType<typeof recheckSavedEvent>;
 
-interface Download { filename: string; mime: string; text: string }
-let downloads: Download[];
-
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout'] });
   vi.setSystemTime(NOW);
-  downloads = [];
-  const blobs = new Map<string, Blob>();
-  let n = 0;
-  vi.stubGlobal('URL', Object.assign(URL, {
-    createObjectURL: vi.fn((b: Blob) => { const u = `blob:test-${n++}`; blobs.set(u, b); return u; }),
-    revokeObjectURL: vi.fn(),
-  }));
-  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
-    const blob = blobs.get(this.href) ?? blobs.get(this.getAttribute('href') ?? '');
-    downloads.push({ filename: this.download, mime: blob?.type ?? '', text: (blob as unknown as { __text?: string })?.__text ?? '' });
-  });
-  // jsdom's Blob has no text(): remember the text a Blob was made from
-  const RealBlob = Blob;
-  vi.stubGlobal('Blob', class extends RealBlob { __text: string; constructor(parts: BlobPart[], o?: BlobPropertyBag) { super(parts, o); this.__text = parts.join(''); } });
   recheck.mockReturnValue(notOk);
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); recheck.mockReset(); });
 
 const show = (events: SavedEvent[], nowMs = NOW) => render(<SavedEvents events={events} data={null} nowMs={nowMs} onDelete={() => {}} />);
-const unfold = (ics: string) => ics.replace(/\r\n[ \t]/g, '').split('\r\n').filter(Boolean);
-const prop = (ics: string, name: string) => unfold(ics).find((l) => l.startsWith(`${name}:`))?.slice(name.length + 1);
-const unescape = (v: string) => v.replace(/\\n/g, '\n').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\');
-const description = (ics: string) => unescape(prop(ics, 'DESCRIPTION')!);
+const linkOf = (card: HTMLElement) => within(card).getByRole('link', { name: 'Add to Google Calendar' }) as HTMLAnchorElement;
+const fields = (href: string) => {
+  const u = new URL(href);
+  return { text: u.searchParams.get('text')!, dates: u.searchParams.get('dates')!, ctz: u.searchParams.get('ctz')!, details: u.searchParams.get('details')! };
+};
 
-describe('the button', () => {
-  it('is on every saved-event card, beside Delete, with the same plain button styling', () => {
+describe('the link', () => {
+  it('is on every saved-event card, beside Delete, opening Google Calendar in a new tab', () => {
     show([makeEvent('a', 120, 131), makeEvent('b', 300, 311)]);
-    const buttons = screen.getAllByRole('button', { name: 'Add to calendar' });
-    expect(buttons).toHaveLength(2);
-    for (const b of buttons) {
-      expect(b.getAttribute('type')).toBe('button');
-      expect(b.className).toBe(''); // no special class: the default button look, unlike the red Delete
-      expect(b.parentElement!.querySelector('button.danger')).toBeTruthy();
+    const links = screen.getAllByRole('link', { name: 'Add to Google Calendar' }) as HTMLAnchorElement[];
+    expect(links).toHaveLength(2);
+    for (const l of links) {
+      expect(l.href.startsWith('https://calendar.google.com/calendar/render?action=TEMPLATE&text=')).toBe(true);
+      expect(l.getAttribute('target')).toBe('_blank');
+      expect(l.getAttribute('rel')).toBe('noopener noreferrer');
+      expect(l.className).toBe('button-link');
+      expect(l.parentElement!.querySelector('button.danger')).toBeTruthy();
     }
+    expect(screen.queryByRole('button', { name: /Add to calendar/i })).toBeNull(); // the old download button is gone
   });
-  it('downloads ONE .ics file named from the event, with the calendar MIME type', () => {
+  it('prefills the approved title, buffered dates, zone and compact plain-text description from the SAVED event', () => {
     show([makeEvent('a', 120, 131)]);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
-    expect(downloads).toHaveLength(1);
-    expect(downloads[0]!.filename).toMatch(/^ISS-60deg-11m-20270109-1100\.ics$/);
-    expect(downloads[0]!.mime).toBe('text/calendar;charset=utf-8');
-    expect(downloads[0]!.text.startsWith('BEGIN:VCALENDAR\r\n')).toBe(true);
+    const f = fields(linkOf(screen.getByRole('article')).href);
+    expect(f.text).toBe('ISS 60° 11m');
+    expect(f.dates).toBe('20270109T165000Z/20270109T171600Z'); // saved AOS 17:00 UTC minus 10 min; saved LOS 17:11 UTC plus 5 min
+    expect(f.ctz).toBe('America/Chicago');
+    expect(f.details.split('\n').slice(0, 4)).toEqual(['ISS — Saturday, January 9, 2027', 'All times CST', '', 'Pass: 11:00:00–11:11:00 AM']);
+    expect(f.details).not.toMatch(/<[a-z/][^>]*>/i);
   });
-  it('tells the person it is a static copy that will not update', () => {
+  it('is exactly what the builder makes from the saved event, whatever the re-check says', () => {
+    const ev = makeEvent('a', 120, 131);
+    const expected = buildGoogleCalendarUrl({ ...ev, alerts: [] }, NOW);
+    show([ev]);
+    expect(linkOf(screen.getByRole('article')).href).toBe(expected);
+    cleanup();
+    recheck.mockReturnValue(okOutcome()); // re-check available and showing nothing lost
+    show([ev]);
+    expect(linkOf(screen.getByRole('article')).href).toBe(expected);
+  });
+  it('says it opens Google Calendar to save there, and that it is a one-time copy that will not update', () => {
     show([makeEvent('a', 120, 131)]);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
-    const note = screen.getByRole('status').textContent!;
-    expect(note).toMatch(/Calendar file downloaded \(ISS-60deg-11m-20270109-1100\.ics\)/);
-    expect(note).toMatch(/static copy of the saved plan and will not update if predictions change/);
+    const note = screen.getByRole('article').textContent!;
+    expect(note).toMatch(/opens Google Calendar with this event filled in; save it there/);
+    expect(note).toMatch(/one-time copy of the saved plan and will not update if predictions change/);
   });
-  it('makes no network request and does not change the saved events', () => {
+  it('makes no network request, and does not change the saved events or storage', () => {
     const fetchSpy = vi.fn(() => { throw new Error('network access is not allowed'); });
     vi.stubGlobal('fetch', fetchSpy);
     const ev = makeEvent('a', 120, 131);
     const before = JSON.stringify(ev);
     localStorage.setItem('sentinel', 'x');
     show([ev]);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(JSON.stringify(ev)).toBe(before);
-    expect(localStorage.length).toBe(1); // nothing was written
+    expect(localStorage.length).toBe(1);
     localStorage.clear();
-  });
-});
-
-describe('the file uses the SAVED times and details', () => {
-  it('is exactly what the builder makes from the saved event, whatever the re-check says', () => {
-    const ev = makeEvent('a', 120, 131);
-    const expected = buildCalendarExport({ ...ev, alerts: [] }, NOW).content;
-    // re-check unavailable
-    show([ev]);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
-    expect(downloads[0]!.text).toBe(expected);
-    // re-check available and showing very different predictions: still the saved times
-    cleanup();
-    recheck.mockReturnValue(okOutcome());
-    show([ev]);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
-    expect(downloads[1]!.text).toBe(expected);
-    expect(prop(downloads[1]!.text, 'DTSTART')).toBe('20270109T165000Z'); // saved AOS 17:00 UTC minus 10 minutes
-    expect(prop(downloads[1]!.text, 'DTEND')).toBe('20270109T171600Z'); // saved LOS 17:11 UTC plus 5 minutes
-  });
-  it('start is 10 minutes before the saved AOS and end is 5 minutes after the saved LOS', () => {
-    const ev = makeEvent('a', 120, 131);
-    show([ev]);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
-    const start = prop(downloads[0]!.text, 'DTSTART')!;
-    const end = prop(downloads[0]!.text, 'DTEND')!;
-    const ms = (s: string) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(9, 11), +s.slice(11, 13), +s.slice(13, 15));
-    expect(ms(start)).toBeLessThanOrEqual(ev.window.start - 10 * 60_000);
-    expect(ms(start)).toBeGreaterThan(ev.window.start - 10 * 60_000 - 1000);
-    expect(ms(end)).toBeGreaterThanOrEqual(ev.window.end + 5 * 60_000);
-    expect(ms(end)).toBeLessThan(ev.window.end + 5 * 60_000 + 1000);
-  });
-  it('a newly saved event carries directions and the threshold interval; an older event gets one note and no invented details', () => {
-    const fresh = makeEvent('new', 120, 131);
-    show([fresh]);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
-    const d = description(downloads[0]!.text);
-    expect(d).toContain('Direction: N → SSW'); // the test geometry rises at 10° and sets at 200°
-    expect(d).toMatch(/Above 40°: .*–.* · 2 min 00 s/);
-    expect(d).not.toContain('not saved');
-    cleanup();
-    show([stripDetails(fresh)]);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
-    const o = description(downloads[1]!.text);
-    expect(o).not.toMatch(/^Direction|^Above /m);
-    expect(o.match(/Some details were not saved with this older event/g)).toHaveLength(1);
-    expect(o).toContain('Pass: 11:00:00–11:11:00 AM'); // everything that WAS saved is exact
   });
 });
 
@@ -164,50 +113,51 @@ describe('a current lost-eligibility warning goes first', () => {
     const ev = makeEvent('a', 120, 131);
     recheck.mockReturnValue(okOutcome(lost));
     show([ev]);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
-    const d = description(downloads[0]!.text);
-    expect(d.split('\n')[0]).toBe('⚠ ISS no longer qualifies: no qualifying FM report in the last 72 hours. Re-check before the event.');
-    expect(d.split('\n')[2]).toBe('ISS — Saturday, January 9, 2027'); // the heading follows the warning
-    expect(prop(downloads[0]!.text, 'DTSTART')).toBe(prop(buildCalendarExport({ ...ev, alerts: [] }, NOW).content, 'DTSTART'));
+    const f = fields(linkOf(screen.getByRole('article')).href);
+    expect(f.details.split('\n')[0]).toBe('⚠ ISS no longer qualifies: no qualifying FM report in the last 72 hours. Re-check before the event.');
+    expect(f.details.split('\n')[2]).toBe('ISS — Saturday, January 9, 2027');
+    expect(f.dates).toBe('20270109T165000Z/20270109T171600Z');
   });
   it('is absent when nothing was lost, and when the re-check could not run (nothing is guessed)', () => {
     const ev = makeEvent('a', 120, 131);
     recheck.mockReturnValue(okOutcome());
     show([ev]);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
-    expect(description(downloads[0]!.text)).not.toContain('⚠');
+    expect(fields(linkOf(screen.getByRole('article')).href).details).not.toContain('⚠');
     cleanup();
     recheck.mockReturnValue(notOk);
     show([ev]);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
-    expect(description(downloads[1]!.text)).not.toContain('⚠');
+    expect(fields(linkOf(screen.getByRole('article')).href).details).not.toContain('⚠');
   });
 });
 
-describe('past events and unusable events', () => {
-  it('a past event still exports, and the file says it is past', () => {
-    const ev = makeEvent('old', 120, 131);
-    show([ev], at(10_000));
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
-    expect(downloads).toHaveLength(1);
-    // the builder's "now" is the system clock: move it past the event
+describe('older, newer, past and unusable events', () => {
+  it('a newly saved event carries directions and the threshold interval; an older event gets one note and no invented details', () => {
+    const fresh = makeEvent('new', 120, 131);
+    show([fresh]);
+    const d = fields(linkOf(screen.getByRole('article')).href).details;
+    expect(d).toContain('Direction: N → SSW'); // the test geometry rises at 10° and sets at 200°
+    expect(d).toMatch(/Above 40°: .*–.* · 2 min 00 s/);
+    expect(d).not.toContain('not saved');
     cleanup();
-    vi.setSystemTime(at(10_000));
-    show([ev], at(10_000));
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
-    expect(description(downloads[1]!.text).split('\n')[0]).toBe('Past event: these passes have already happened.');
+    show([stripDetails(fresh)]);
+    const o = fields(linkOf(screen.getByRole('article')).href).details;
+    expect(o).not.toMatch(/^Direction|^Above /m);
+    expect(o.match(/Some details were not saved with this older event/g)).toHaveLength(1);
+    expect(o).toContain('Pass: 11:00:00–11:11:00 AM');
   });
-  it('an event whose saved pass data is broken shows a message, downloads nothing, and does not crash the page', () => {
+  it('a past event still has the link, and the description says it is past', () => {
+    show([makeEvent('old', 120, 131)], at(10_000));
+    expect(fields(linkOf(screen.getByRole('article')).href).details.split('\n')[0]).toBe('Past event: these passes have already happened.');
+  });
+  it('an event whose saved pass data is broken shows a message instead of a link, and the other cards are unaffected', () => {
     const ev = makeEvent('bad', 120, 131);
     const broken: SavedEvent = { ...ev, original: { ...ev.original, counted: [{ ...ev.original.counted[0]!, setMs: ev.original.counted[0]!.riseMs - 60_000 }] } };
     show([broken, makeEvent('ok', 300, 311)]);
     const cards = screen.getAllByRole('article');
-    fireEvent.click(within(cards[0]!).getByRole('button', { name: 'Add to calendar' }));
-    expect(downloads).toHaveLength(0);
-    expect(within(cards[0]!).getByRole('alert').textContent).toMatch(/Cannot export: pass 1 \(ISS\) has a LOS at or before its AOS\. Nothing was downloaded\./);
-    // the other card still works
-    fireEvent.click(within(cards[1]!).getByRole('button', { name: 'Add to calendar' }));
-    expect(downloads).toHaveLength(1);
+    expect(within(cards[0]!).queryByRole('link', { name: 'Add to Google Calendar' })).toBeNull();
+    expect((within(cards[0]!).getByRole('button', { name: 'Add to Google Calendar' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(cards[0]!).getByRole('alert').textContent).toBe('Cannot export: pass 1 (ISS) has a LOS at or before its AOS. Nothing can be added to a calendar for this event.');
+    expect(linkOf(cards[1]!).href).toContain('calendar.google.com');
   });
 });
 
@@ -226,7 +176,6 @@ describe('newly saved events store the optional details; existing events are unt
     const before = JSON.stringify(old);
     expect(isSavedEvent(JSON.parse(before))).toBe(true);
     show([old]);
-    fireEvent.click(screen.getByRole('button', { name: 'Add to calendar' }));
     expect(JSON.stringify(old)).toBe(before);
     expect(Object.keys(old.original.counted[0]!)).not.toContain('riseAzDeg');
   });
@@ -236,19 +185,3 @@ describe('newly saved events store the optional details; existing events are unt
     expect(ev.original.counted[0]!.aboveThreshold).toBeNull();
   });
 });
-
-describe('downloadTextFile', () => {
-  it('makes a Blob of the right type, clicks a hidden download link once, removes it, and releases the address later', () => {
-    const create = vi.mocked(URL.createObjectURL);
-    const revoke = vi.mocked(URL.revokeObjectURL);
-    downloadTextFile('x.ics', 'BEGIN:VCALENDAR', 'text/calendar;charset=utf-8');
-    expect(create).toHaveBeenCalledTimes(1);
-    expect((create.mock.calls[0]![0] as Blob).type).toBe('text/calendar;charset=utf-8');
-    expect(downloads).toEqual([{ filename: 'x.ics', mime: 'text/calendar;charset=utf-8', text: 'BEGIN:VCALENDAR' }]);
-    expect(document.querySelector('a[download]')).toBeNull(); // removed again
-    expect(revoke).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(10_001);
-    expect(revoke).toHaveBeenCalledTimes(1);
-  });
-});
-

@@ -54,6 +54,7 @@ button.primary[disabled] { opacity: .6; cursor: progress; }
 button.secondary { background: transparent; }
 button.secondary.saved { color: var(--ok); border-color: var(--ok); }
 .card-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+a.button-link { display: inline-flex; align-items: center; font: inherit; min-height: 44px; box-sizing: border-box; border-radius: 8px; padding: 8px 16px; border: 1px solid var(--border); background: var(--surface); color: var(--text); text-decoration: none; }
 button.danger { color: var(--bad); border-color: var(--bad); background: transparent; }
 form > button.primary { width: 100%; margin-top: 8px; font-size: 1.05rem; }
 .chips { display: flex; gap: 8px; margin-top: 8px; }

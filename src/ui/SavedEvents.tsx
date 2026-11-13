@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { ACTIVITIES } from '../catalog/catalog.ts';
 import type { LoadedData } from '../planner.ts';
-import { InvalidCalendarDataError, buildCalendarExport, lostEligibilityAlerts } from '../export/ics.ts';
+import { buildGoogleCalendarUrl } from '../export/googleCalendar.ts';
+import { InvalidCalendarDataError, lostEligibilityAlerts } from '../export/ics.ts';
 import { recheckSavedEvent } from '../saved/recheck.ts';
 import type { SavedEvent } from '../saved/saved.ts';
-import { downloadTextFile } from './download.ts';
 import { PassCard } from './PassCard.tsx';
 import { Timeline } from './Timeline.tsx';
 import { fmtDateTime, fmtDay, fmtEndMin, fmtSpanMin, fmtStartMin, fmtTime, tzAbbrev } from './format.ts';
@@ -54,22 +54,20 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
   const out = useMemo(() => recheckSavedEvent(ev, data, nowMs), [ev, data, nowMs]);
   const tz = ev.timeZone;
   const c = ev.criteria;
-  const [calendarMsg, setCalendarMsg] = useState<{ kind: 'done' | 'error'; text: string } | null>(null);
 
   /**
-   * Download a calendar file for this event as SAVED (the saved times and details, never recalculated ones). The only thing taken
-   * from the re-check is a current lost-eligibility warning, which goes at the top of the description. Nothing is sent anywhere.
+   * The "Add to Google Calendar" link, built from the event AS SAVED (the saved times and details, never recalculated ones). The only
+   * thing taken from the re-check is a current lost-eligibility warning, which goes first in the description. The link opens Google
+   * Calendar with the event filled in; the person saves it there. Nothing is sent from this page, and nothing is stored.
    */
-  const addToCalendar = () => {
+  const calendar = useMemo(() => {
     try {
       const alerts = out.ok ? lostEligibilityAlerts(out.recheck.lostEligibility) : [];
-      const file = buildCalendarExport({ ...ev, alerts }, Date.now());
-      downloadTextFile(file.filename, file.content, file.mimeType);
-      setCalendarMsg({ kind: 'done', text: `Calendar file downloaded (${file.filename}). It is a static copy of the saved plan and will not update if predictions change.` });
+      return { url: buildGoogleCalendarUrl({ ...ev, alerts }, nowMs) } as const;
     } catch (e) {
-      setCalendarMsg({ kind: 'error', text: `${e instanceof InvalidCalendarDataError ? e.message : 'The calendar file could not be created.'} Nothing was downloaded.` });
+      return { error: `${e instanceof InvalidCalendarDataError ? e.message : 'The calendar link could not be created.'} Nothing can be added to a calendar for this event.` } as const;
     }
-  };
+  }, [ev, out, nowMs]);
 
   return (
     <article className="card event saved" aria-label={`Saved event ${fmtDay(ev.window.start, tz)}`}>
@@ -84,12 +82,18 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
           </p>
         </div>
         <div className="card-actions">
-          <button type="button" onClick={addToCalendar} title="Download a calendar file (.ics) with this event's saved times">Add to calendar</button>
+          {'url' in calendar ? (
+            <a className="button-link" href={calendar.url} target="_blank" rel="noopener noreferrer">Add to Google Calendar</a>
+          ) : (
+            <button type="button" disabled>Add to Google Calendar</button>
+          )}
           <button type="button" className="danger" onClick={onDelete}>Delete</button>
         </div>
       </header>
-      {calendarMsg && (
-        <p className={calendarMsg.kind === 'error' ? 'notice warn' : 'hint small'} role={calendarMsg.kind === 'error' ? 'alert' : 'status'}>{calendarMsg.text}</p>
+      {'url' in calendar ? (
+        <p className="hint small">Add to Google Calendar opens Google Calendar with this event filled in; save it there. It is a one-time copy of the saved plan and will not update if predictions change.</p>
+      ) : (
+        <p className="notice warn" role="alert">{calendar.error}</p>
       )}
 
       <p className="summary">
