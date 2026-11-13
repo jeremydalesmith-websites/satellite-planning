@@ -28,19 +28,29 @@ const step = (fragment: string) => {
 const indexOfStep = (fragment: string) => steps.indexOf(step(fragment));
 
 describe('triggers and concurrency', () => {
-  it('is manual-only for the initial rollout: workflow_dispatch is required and there is NO active schedule or other trigger', () => {
-    const on = /\non:\n((?:  [^\n]*\n|\n)+)/.exec(code + '\n')?.[1] ?? '';
+  const on = /\non:\n((?:  [^\n]*\n|\n)+)/.exec(code + '\n')?.[1] ?? '';
+  it('has the manual trigger and exactly one daily schedule, and nothing else can start it (so it cannot loop)', () => {
     expect(on).toMatch(/^  workflow_dispatch:/m);
-    expect(code).toContain('workflow_dispatch');
-    expect(code).not.toMatch(/\n\s*schedule:/);
-    expect(code).not.toMatch(/\bcron:/);
-    expect(code).not.toMatch(/\n\s+(push|pull_request|pull_request_target|workflow_run|repository_dispatch|workflow_call):/); // nothing else can start it, so it cannot loop
-    expect(on.split('\n').filter((l) => /^ {2}\S/.test(l)).map((l) => l.trim().split(':')[0])).toEqual(['workflow_dispatch']);
+    expect(on.split('\n').filter((l) => /^ {2}\S/.test(l)).map((l) => l.trim().split(':')[0])).toEqual(['schedule', 'workflow_dispatch']);
+    expect(code).not.toMatch(/\n\s+(push|pull_request|pull_request_target|workflow_run|repository_dispatch|workflow_call):/);
+    expect(code.match(/\bcron:/g)).toHaveLength(1); // one schedule entry, not several
   });
-  it('even commented-out scheduling is absent from the file (the daily trigger is described in the README and added later)', () => {
-    expect(yml).not.toMatch(/cron:/);
-    expect(readFileSync('deploy/README.md', 'utf8')).toMatch(/Schedule added only after that/i);
-    expect(yml).toMatch(/MANUAL ONLY AT FIRST/);
+  it('runs once a day at 09:17 UTC: fixed minute and hour, every day, an off-the-hour minute', () => {
+    const cron = /cron: '([^']+)'/.exec(code)?.[1] ?? '';
+    expect(cron).toBe('17 9 * * *');
+    const [minute, hour, dom, month, dow] = cron.split(' ');
+    expect(minute).toMatch(/^\d+$/);
+    expect(hour).toMatch(/^\d+$/); // a single hour: not "*" or a list, so once per day
+    expect([dom, month, dow]).toEqual(['*', '*', '*']);
+    expect(Number(minute)).not.toBe(0);
+  });
+  it('the README states the same time, with the local-time conversion and the daylight-saving shift', () => {
+    const readme = readFileSync('deploy/README.md', 'utf8');
+    expect(readme).toContain("cron: '17 9 * * *'");
+    expect(readme).toMatch(/09:17 UTC/);
+    expect(readme).toMatch(/3:17 AM/);
+    expect(readme).toMatch(/4:17 AM/);
+    expect(yml).toContain('(03:17 US Central standard time, 04:17 daylight time)');
   });
   it('never overlaps itself and never cancels a run in progress', () => {
     expect(code).toMatch(/concurrency:\n\s+group: update-satellites\n\s+cancel-in-progress: false/);

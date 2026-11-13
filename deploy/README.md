@@ -1,9 +1,9 @@
-# Proposed: automated data update for k1kfx.com/satellites/ (manual first, daily later)
+# Automated data update for k1kfx.com/satellites/ (manual run verified; daily schedule proposed)
 
-**Status: a draft for the owner's review. Nothing here is enabled.** `update-satellites.yml` sits in `deploy/`, not in
-`.github/workflows/`, so it cannot run from this repository. It would be copied to the website repository only after the
-owner approves that specific change. **Initial operation is manual only:** the file has the "Run workflow" trigger and
-**no schedule**. See "Rollout" below.
+**Status.** `update-satellites.yml` lives in this folder as the reviewed source. The **manual-only** version was installed in the
+website repository's `.github/workflows/` and run once by hand (run #3), and the public site was verified afterwards (see "Rollout").
+**This version adds the daily schedule and is a proposal: it is not installed until the owner approves that specific change.**
+It sits in `deploy/`, not in `.github/workflows/`, so it cannot run from this repository.
 
 ## The arrangement it keeps
 
@@ -12,28 +12,38 @@ of the website repository (`k1kfx.com`, branch `main`), which GitHub Pages serve
 keeps that arrangement: no Cloudflare project, no DNS change, no change of Pages source, no backend, no public "Update
 now" button, and no polling in the browser. It automates the copy that is now done by hand with GitHub Desktop.
 
-## Rollout: manual first, schedule later
+## Rollout: manual first, then the schedule
 
-1. **Install, manual only.** The workflow file is added to the website repository with `workflow_dispatch` as its only
-   trigger. Nothing runs on its own, so it cannot publish anything until the owner presses the button.
-2. **One manual run, verified.** The owner adds `SITE_PUSH_TOKEN`, runs it once, and checks: the run is green; the public
-   `https://k1kfx.com/satellites/data/status.json` shows the new download time; the single bot commit changed only files under
-   `satellites/`; `hunt/`, `CNAME` and the other pages are untouched; the planner page loads and searches normally; and no
-   failure issue was opened. If the run fails, the issue and the Actions log show where; nothing was published unless the
-   failing step was the final live check.
-3. **Schedule added only after that.** A separate, reviewed change to the workflow file then adds the daily trigger (UTC,
-   at an off-the-hour minute; GitHub may start scheduled runs late):
+1. **Installed, manual only** (done). The workflow file was added to the website repository with `workflow_dispatch` as its only
+   trigger. GitHub first rejected that copy for a YAML syntax error (an unquoted colon in a step name); the corrected file was
+   installed and accepted.
+2. **One manual run, verified** (done: run #3 succeeded). The public `data/status.json` and `data/elements.json` showed new
+   download times; `version.json` named the pinned build; the single bot commit changed only files under `satellites/`;
+   `hunt/`, `CNAME` and the root page were untouched; the live planner loaded and searched normally, with the new
+   "Keplers updated … · Activity reports updated …" line; and the Pages build for the bot commit succeeded.
+3. **Schedule** (this proposal). One daily trigger is added, as a separate reviewed change to the workflow file:
    ```yaml
    on:
      schedule:
        - cron: '17 9 * * *'
      workflow_dispatch: {}
    ```
-   Until that change is made and approved, no schedule exists, and the tests require its absence.
+   * **When:** every day at **09:17 UTC**. In US Central time that is **3:17 AM** while standard time applies (about early
+     November to mid-March, UTC−6) and **4:17 AM** during daylight time (UTC−5). GitHub schedules use UTC and do not follow
+     daylight saving, so the local time shifts by an hour twice a year. The minute is deliberately off the hour, because GitHub
+     delays runs that start at the top of the hour when load is high.
+   * **Why then:** the activity reports are volunteer-submitted during the day; a morning run (US time) collects the previous
+     day's reports, and a fresh copy is waiting before anyone plans the day.
+   * **Same safeguards:** the same pinned planner commit, strict all-or-nothing refresh, validation, a guard that only
+     `satellites/` may change, one run at a time, and the failure issue on error.
+   * **Checks after the first scheduled run** (the first one starts at the next 09:17 UTC after installation): it appears in the
+     Actions tab as triggered by "schedule", it succeeds, the public data timestamps advance, and only `satellites/` changed.
+   * **To stop it:** remove the `schedule:` lines (or disable the workflow in the Actions tab); the manual button keeps
+     working.
 
 ## What one run does
 
-Only when the owner presses **Run workflow** in the website repo's Actions tab (there is no schedule yet):
+Daily at 09:17 UTC once the schedule is installed, and whenever the owner presses **Run workflow** in the website repo's Actions tab:
 
 1. Stops at once, with a clear message, if the push token secret is missing or if GitHub Pages is no longer published from
    the `main` branch (checked through the Pages settings API), before anything is changed.
@@ -184,13 +194,13 @@ runners and the real repositories), so its other YAML and shell steps are review
 
 ## Limitations (stated plainly)
 
-* **Until the schedule is added the data does not refresh by itself.** After the manual run the planner shows the data's real
-  age ("Keplers updated N hours ago · Activity reports updated N hours ago"), and the activity-report notices appear once it
-  is over 24 hours old; the 72-hour rule means nothing stays eligible without fresh reports.
-* **Once a schedule is added:** GitHub may start a scheduled run several minutes late, or occasionally skip one under load. A late run can make the
+* **Without the schedule the data does not refresh by itself.** The planner shows the data's real age ("Keplers updated N
+  hours ago · Activity reports updated N hours ago"), and the activity-report notices appear once it is over 24 hours old; the
+  72-hour rule means nothing stays eligible without fresh reports.
+* **With the schedule:** GitHub may start a scheduled run several minutes late, or occasionally skip one under load. A late run can make the
   activity reports show their "over 24 hours old" notice for a short time before the next update lands. The cadence
   asked for is 24 hours; every 12 hours would remove that edge case at the cost of 18 more AMSAT requests a day.
-* Once a schedule exists, GitHub disables scheduled workflows after 60 days without repository activity. The daily commit is itself activity, so
+* GitHub disables scheduled workflows after 60 days without repository activity. The daily commit is itself activity, so
   it should keep itself alive, but this has not been observed; no issue appears if GitHub simply stops scheduling. Run
   workflow re-enables it.
 * A run only proves the data is fresh and valid. It cannot tell whether an amateur-radio repeater is actually working;

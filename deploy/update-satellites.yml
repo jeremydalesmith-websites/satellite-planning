@@ -3,9 +3,9 @@
 #   .github/workflows/update-satellites.yml        (branch: main)
 # It is deliberately NOT under .github/workflows here, so it cannot run from this repository.
 #
-# ROLLOUT: MANUAL ONLY AT FIRST. This version runs only when the owner presses "Run workflow" (workflow_dispatch). There is
-# deliberately NO schedule trigger yet. A daily schedule will be added, as a separate reviewed change, only after the first
-# successful manual run has been verified (see deploy/README.md, "Rollout").
+# TRIGGERS: the manual "Run workflow" button (workflow_dispatch) and one daily schedule at 09:17 UTC. The schedule was added only
+# after the first manual run (#3) had been verified on the public site (see deploy/README.md, "Rollout"). GitHub runs a schedule
+# from the copy of this file on the default branch (main), may start it several minutes late, and may skip a run under heavy load.
 #
 # What one run does:
 #   1. downloads fresh Keplers and activity reports with the planner's own refresh script (strict: all or nothing)
@@ -40,7 +40,9 @@
 name: Update satellites
 
 on:
-  workflow_dispatch: {} # manual "Run workflow" button in the Actions tab; the only trigger for now (no schedule yet)
+  schedule:
+    - cron: '17 9 * * *' # once a day at 09:17 UTC (03:17 US Central standard time, 04:17 daylight time); an off-the-hour minute
+  workflow_dispatch: {} # manual "Run workflow" button in the Actions tab
 
 # One run at a time; a second run waits rather than racing the first.
 concurrency:
@@ -52,7 +54,7 @@ permissions: {}
 
 env:
   # The approved planner version: a PINNED COMMIT (not a branch), so every run publishes exactly the code the
-  # owner approved and never whatever happens to be on a branch, whether the run is manual or (later) scheduled. To publish a newer planner version: change this SHA
+  # owner approved and never whatever happens to be on a branch, whether the run is manual or scheduled. To publish a newer planner version: change this SHA
   # (a reviewed one-line commit to this file). See deploy/README.md.
   PLANNER_REPO: jeremydalesmith-websites/satellite-planning
   PLANNER_SHA: aff62d0ba20c1ab26d12a1b6a9e051bcd1a26a56
