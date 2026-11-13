@@ -57,7 +57,7 @@ env:
   # owner approved and never whatever happens to be on a branch, whether the run is manual or scheduled. To publish a newer planner version: change this SHA
   # (a reviewed one-line commit to this file). See deploy/README.md.
   PLANNER_REPO: jeremydalesmith-websites/satellite-planning
-  PLANNER_SHA: de3911e978c142624d154b52b60af4cce5c862c1
+  PLANNER_SHA: 379a26b7b7c724cbe194ea849bf50016a567dc02
   SITE_URL: https://k1kfx.com/satellites/
 
 jobs:
