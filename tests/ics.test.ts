@@ -37,6 +37,10 @@ const pass = (o: Partial<CalendarPass> & Pick<CalendarPass, 'noradId' | 'name' |
   eligibleMaxElevationDeg: o.fullMaxElevationDeg ?? 60,
   statusState: 'recently-reported-active',
   ...o,
+  // The shared threshold interval belongs to the ISS pass; for any other pass it is moved to start a minute after that pass begins.
+  ...(o.aboveThreshold && (o.aboveThreshold.start < o.riseMs || o.aboveThreshold.end > o.setMs)
+    ? { aboveThreshold: { start: o.riseMs + 60_000, end: o.riseMs + 60_000 + (o.aboveThreshold.end - o.aboveThreshold.start) } }
+    : {}),
 });
 const iss = (extra: Partial<CalendarPass> = {}) =>
   pass({ noradId: ISS, name: 'ISS', riseMs: T1, peakMs: Date.UTC(2026, 10, 14, 23, 37, 20), setMs: T1 + 646_200, fullMaxElevationDeg: 75.2, ...extra }); // 10 min 46.2 s
@@ -277,10 +281,10 @@ describe('description: compact, readable, exact', () => {
     expect(desc([so50a(EXTRAS)])).not.toContain('availability depends'); // not an ISS-style repeater
     expect(desc([ao91()])).not.toMatch(/availability|timer/);
   });
-  it('a sunlight-limited pass states the sunlit-usable elevation and the restriction right under the heading, before the pass times', () => {
+  it('a sunlight-limited pass states the sunlit elevation and the restriction right under the heading, before the pass times', () => {
     const t = desc([ao91()]);
     const lines = t.split('\n');
-    expect(lines[3]).toBe('Sunlight only: usable while the satellite is in sunlight; sunlit peak 62° (pass peak 85°), 8 min 12 s of 11 min 06 s usable.');
+    expect(lines[3]).toBe('Sunlight only: works only while the satellite is in sunlight; sunlit peak 62° (pass peak 85°); sunlit operating time 8 min 12 s of 11 min 06 s.');
     expect(t.indexOf('Sunlight only')).toBeLessThan(t.indexOf('Pass:'));
     expect(desc([ao91({ sunlight: 'partly-eclipsed' })])).toContain('Partly in Earth’s shadow.');
     expect(desc([ao91({ eligibleMaxElevationDeg: null })])).toContain('no sunlit peak');

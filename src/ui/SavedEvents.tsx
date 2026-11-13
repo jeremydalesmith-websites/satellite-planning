@@ -62,7 +62,8 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
    */
   const calendar = useMemo(() => {
     try {
-      const alerts = out.ok ? lostEligibilityAlerts(out.recheck.lostEligibility) : [];
+      // A past event gets no "re-check before the event" warning: the label "Past event" already says it.
+      const alerts = out.ok && !out.passed ? lostEligibilityAlerts(out.recheck.lostEligibility) : [];
       return { url: buildGoogleCalendarUrl({ ...ev, alerts }, nowMs) } as const;
     } catch (e) {
       return { error: `${e instanceof InvalidCalendarDataError ? e.message : 'The calendar link could not be created.'} Nothing can be added to a calendar for this event.` } as const;

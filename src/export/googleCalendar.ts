@@ -40,7 +40,7 @@ export function buildGoogleCalendarUrl(source: CalendarSource, exportedAtMs: Ms,
     'action=TEMPLATE',
     `text=${encode(title)}`,
     `dates=${compactUtc(t.startMs)}/${compactUtc(t.endMs)}`,
-    `ctz=${source.timeZone}`, // an IANA name (validated by the description step): letters, digits, "/", "_", "-", "+"
+    `ctz=${encode(source.timeZone).replace(/%2F/g, '/')}`, // an IANA name (validated by the description step); "+" (Etc/GMT+5) must be encoded or it reads as a space
     `details=${encode(description)}`,
   ];
   return `${GOOGLE_CALENDAR_TEMPLATE_URL}?${query.join('&')}`;

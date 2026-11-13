@@ -22,6 +22,10 @@ const pass = (o: Partial<CalendarPass> & Pick<CalendarPass, 'noradId' | 'name' |
   eligibleMaxElevationDeg: o.fullMaxElevationDeg ?? 60,
   statusState: 'recently-reported-active',
   ...o,
+  // The shared threshold interval belongs to the ISS pass; for any other pass it is moved to start a minute after that pass begins.
+  ...(o.aboveThreshold && (o.aboveThreshold.start < o.riseMs || o.aboveThreshold.end > o.setMs)
+    ? { aboveThreshold: { start: o.riseMs + 60_000, end: o.riseMs + 60_000 + (o.aboveThreshold.end - o.aboveThreshold.start) } }
+    : {}),
 });
 const EXTRAS = { riseAzDeg: 22, setAzDeg: 158, aboveThreshold: { start: Date.UTC(2026, 10, 14, 23, 34, 10), end: Date.UTC(2026, 10, 14, 23, 40, 30) } };
 const iss = (extra: Partial<CalendarPass> = {}) => pass({ noradId: ISS, name: 'ISS', riseMs: T1, peakMs: Date.UTC(2026, 10, 14, 23, 37, 20), setMs: T1 + 646_200, fullMaxElevationDeg: 75.2, ...EXTRAS, ...extra });
@@ -103,9 +107,9 @@ describe('several passes and alerts', () => {
   it('a past event is labeled past in the description', () => {
     expect(parts(buildGoogleCalendarUrl(source([iss()]), Date.UTC(2026, 10, 16))).details.split('\n')[0]).toBe('Past event: these passes have already happened.');
   });
-  it('a sunlight-limited pass keeps its sunlit-usable line right under the heading', () => {
+  it('a sunlight-limited pass keeps its sunlit-peak line right under the heading', () => {
     const ao = pass({ noradId: AO91, name: 'AO-91', riseMs: T1, setMs: T1 + 666_000, fullMaxElevationDeg: 85.2, eligibleMaxElevationDeg: 62.4, operatingMs: 492_000, ...EXTRAS });
-    expect(parts(buildGoogleCalendarUrl(source([ao]), BEFORE)).details.split('\n')[3]).toMatch(/^Sunlight only: usable while the satellite is in sunlight; sunlit peak 62° \(pass peak 85°\)/);
+    expect(parts(buildGoogleCalendarUrl(source([ao]), BEFORE)).details.split('\n')[3]).toMatch(/^Sunlight only: works only while the satellite is in sunlight; sunlit peak 62° \(pass peak 85°\); sunlit operating time /);
   });
 });
 
@@ -200,4 +204,30 @@ describe('a pure snapshot', () => {
     expect(runs.map((r) => r.offset)).toEqual([-780, 360, -330, 0]); // each process really was in a different zone
     for (const r of runs) expect(r.url).toBe(runs[0]!.url);
   }, 60_000);
+});
+
+describe('review fixes', () => {
+  it('a "+" in the time zone is encoded, so it cannot be read as a space', () => {
+    const url = buildGoogleCalendarUrl(source([iss()], 'Etc/GMT+5'), BEFORE);
+    expect(url).toContain('&ctz=Etc/GMT%2B5&');
+    expect(new URL(url).searchParams.get('ctz')).toBe('Etc/GMT+5');
+    expect(new URL(buildGoogleCalendarUrl(source([iss()]), BEFORE)).searchParams.get('ctz')).toBe('America/Chicago');
+  });
+  it.each([
+    ['elevation above 90', { fullMaxElevationDeg: 400 }, /invalid maximum elevation/],
+    ['negative elevation', { fullMaxElevationDeg: -12 }, /invalid maximum elevation/],
+    ['a pass longer than an hour', { setMs: T1 + 61 * 60_000, peakMs: T1 + 60_000 }, /longer than 60 minutes/],
+    ['no satellite name', { name: undefined as unknown as string }, /no satellite name/],
+    ['operating time longer than the pass', { operatingMs: 2 * 3600_000 }, /invalid operating time/],
+    ['sunlit peak above the pass peak', { eligibleMaxElevationDeg: 89 }, /invalid sunlit elevation/],
+  ])('rejects %s', (_n, over, re) => {
+    expect(() => buildGoogleCalendarUrl(source([iss(over as Partial<CalendarPass>)]), BEFORE)).toThrow(re);
+  });
+  it('rejects a threshold interval outside the pass', () => {
+    const p = { ...iss(), aboveThreshold: { start: T1 + 86_400_000, end: T1 + 86_400_000 + 1000 } };
+    expect(() => buildGoogleCalendarUrl(source([p]), BEFORE)).toThrow(/outside the pass/);
+  });
+  it('rejects a missing time zone', () => {
+    expect(() => buildGoogleCalendarUrl(source([iss()], 'America/Chicago', { timeZone: undefined as unknown as string }), BEFORE)).toThrow(/time zone/);
+  });
 });

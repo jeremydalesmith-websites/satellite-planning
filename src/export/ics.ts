@@ -65,6 +65,8 @@ export class InvalidCalendarDataError extends Error {
   }
 }
 
+/** A real LEO pass is well under an hour; anything longer is corrupted data, not a pass. */
+const MAX_PASS_MIN = 60;
 const isTime = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
@@ -81,24 +83,29 @@ export function validatePasses(passes: readonly CalendarPass[]): void {
     const bad = (why: string): never => {
       throw new InvalidCalendarDataError(`Cannot export: ${who} ${why}.`);
     };
+    if (typeof p.name !== 'string' || p.name.trim() === '') bad('has no satellite name');
+    if (!Number.isInteger(p.noradId)) bad('has an invalid satellite number');
     if (!isTime(p.riseMs)) bad('has an invalid AOS time');
     if (!isTime(p.setMs)) bad('has an invalid LOS time');
     if (!isTime(p.peakMs)) bad('has an invalid peak time');
     if (!(p.setMs > p.riseMs)) bad('has a LOS at or before its AOS');
     if (p.peakMs < p.riseMs || p.peakMs > p.setMs) bad('has a peak outside the pass');
-    if (!isNumber(p.fullMaxElevationDeg)) bad('has an invalid maximum elevation');
-    if (!isNumber(p.operatingMs) || p.operatingMs < 0) bad('has an invalid operating time');
-    if (p.eligibleMaxElevationDeg !== null && !isNumber(p.eligibleMaxElevationDeg)) bad('has an invalid sunlit elevation');
+    if (p.setMs - p.riseMs > MAX_PASS_MIN * MIN) bad(`lasts longer than ${MAX_PASS_MIN} minutes`);
+    if (!isNumber(p.fullMaxElevationDeg) || p.fullMaxElevationDeg < 0 || p.fullMaxElevationDeg > 90) bad('has an invalid maximum elevation');
+    if (!isNumber(p.operatingMs) || p.operatingMs < 0 || p.operatingMs > p.setMs - p.riseMs) bad('has an invalid operating time');
+    if (p.eligibleMaxElevationDeg !== null && (!isNumber(p.eligibleMaxElevationDeg) || p.eligibleMaxElevationDeg < 0 || p.eligibleMaxElevationDeg > p.fullMaxElevationDeg)) bad('has an invalid sunlit elevation');
     if (p.riseAzDeg !== undefined && !isNumber(p.riseAzDeg)) bad('has an invalid rise direction');
     if (p.setAzDeg !== undefined && !isNumber(p.setAzDeg)) bad('has an invalid set direction');
     if (p.aboveThreshold) {
       if (!isTime(p.aboveThreshold.start) || !isTime(p.aboveThreshold.end)) bad('has an invalid time-above-threshold interval');
       if (p.aboveThreshold.end < p.aboveThreshold.start) bad('has a time-above-threshold interval that runs backwards');
+      if (p.aboveThreshold.start < p.riseMs || p.aboveThreshold.end > p.setMs) bad('has a time-above-threshold interval outside the pass');
     }
   });
 }
 
 function validateContext(source: CalendarSource, exportedAtMs: Ms): void {
+  if (typeof source.timeZone !== 'string' || source.timeZone === '') throw new InvalidCalendarDataError('Cannot export: the saved time zone is missing.');
   if (!isTime(exportedAtMs)) throw new InvalidCalendarDataError('Cannot export: the export time is invalid.');
   if (!isTime(source.savedAtMs)) throw new InvalidCalendarDataError('Cannot export: the saved time is invalid.');
   if (!isNumber(source.criteria.minElevationDeg)) throw new InvalidCalendarDataError('Cannot export: the saved elevation threshold is invalid.');
@@ -214,7 +221,7 @@ function passLines(p: CalendarPass, style: TimeStyle, thresholdDeg: number): str
   const lines: string[] = [];
   if (act?.sunlightRequired) {
     const peak = p.eligibleMaxElevationDeg === null ? 'no sunlit peak' : `sunlit peak ${Math.round(p.eligibleMaxElevationDeg)}° (pass peak ${Math.round(p.fullMaxElevationDeg)}°)`;
-    lines.push(`Sunlight only: usable while the satellite is in sunlight; ${peak}, ${exactDuration(p.operatingMs)} of ${exactDuration(p.setMs - p.riseMs)} usable.${p.sunlight === 'partly-eclipsed' ? ' Partly in Earth’s shadow.' : ''}`);
+    lines.push(`Sunlight only: works only while the satellite is in sunlight; ${peak}; sunlit operating time ${exactDuration(p.operatingMs)} of ${exactDuration(p.setMs - p.riseMs)}.${p.sunlight === 'partly-eclipsed' ? ' Partly in Earth’s shadow.' : ''}`);
   }
   lines.push(`Pass: ${style.range(p.riseMs, p.setMs)}`);
   lines.push(`Peak: ${style.at(p.peakMs)} · ${Math.round(p.fullMaxElevationDeg)}°`);

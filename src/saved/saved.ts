@@ -82,8 +82,9 @@ function toSaved(a: PassAssessment): SavedOpportunity {
     fullMaxElevationDeg: a.fullMaxElevationDeg,
     eligibleMaxElevationDeg: a.eligibleMaxElevationDeg,
     statusState: a.status.state,
-    riseAzDeg: a.riseAzDeg,
-    setAzDeg: a.setAzDeg,
+    // A direction that could not be computed is left out (JSON would turn NaN into null); it never blocks a calendar link.
+    ...(Number.isFinite(a.riseAzDeg) ? { riseAzDeg: a.riseAzDeg } : {}),
+    ...(Number.isFinite(a.setAzDeg) ? { setAzDeg: a.setAzDeg } : {}),
     aboveThreshold: a.aboveThreshold ? { ...a.aboveThreshold } : null,
     sunlight: a.sunlight,
   };

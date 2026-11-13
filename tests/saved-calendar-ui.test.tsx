@@ -149,6 +149,13 @@ describe('older, newer, past and unusable events', () => {
     show([makeEvent('old', 120, 131)], at(10_000));
     expect(fields(linkOf(screen.getByRole('article')).href).details.split('\n')[0]).toBe('Past event: these passes have already happened.');
   });
+  it('a past event gets no "re-check before the event" warning, even if the re-check reports a loss', () => {
+    recheck.mockReturnValue({ ...(okOutcome([{ noradId: ISS, name: 'ISS', peakMs: at(125), reason: 'no qualifying FM report' }]) as object), passed: true } as unknown as ReturnType<typeof recheckSavedEvent>);
+    show([makeEvent('old', 120, 131)], at(10_000));
+    const d = fields(linkOf(screen.getByRole('article')).href).details;
+    expect(d.split('\n')[0]).toBe('Past event: these passes have already happened.');
+    expect(d).not.toContain('⚠');
+  });
   it('an event whose saved pass data is broken shows a message instead of a link, and the other cards are unaffected', () => {
     const ev = makeEvent('bad', 120, 131);
     const broken: SavedEvent = { ...ev, original: { ...ev.original, counted: [{ ...ev.original.counted[0]!, setMs: ev.original.counted[0]!.riseMs - 60_000 }] } };
@@ -178,6 +185,14 @@ describe('newly saved events store the optional details; existing events are unt
     show([old]);
     expect(JSON.stringify(old)).toBe(before);
     expect(Object.keys(old.original.counted[0]!)).not.toContain('riseAzDeg');
+  });
+  it('a direction that could not be computed is left out (not stored as NaN/null) and the link still works', () => {
+    const a = assessed({ norad: ISS, rise: 120, set: 131, maxEl: 60 });
+    const ev = snapshotEvent({ window: iv(120, 131), counted: [{ ...a, riseAzDeg: NaN }], distinctSatellites: 1, totalOperatingMs: a.operatingMs }, { latDeg: 1, lonDeg: 2 }, 'UTC', criteria, meta, at(0), 'n');
+    const p = JSON.parse(JSON.stringify(ev)).original.counted[0];
+    expect('riseAzDeg' in p).toBe(false);
+    show([ev]);
+    expect(linkOf(screen.getByRole('article')).href).toContain('calendar.google.com');
   });
   it('a pass that never reached the threshold is stored as null (not "unknown")', () => {
     const a = assessed({ norad: SO50, rise: 120, set: 131, maxEl: 60, above: null });
