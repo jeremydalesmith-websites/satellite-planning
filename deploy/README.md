@@ -178,7 +178,8 @@ ineligible.
 `tests/deploy-workflow.test.ts` checks the workflow file's triggers, concurrency, permissions, token placement, time limits,
 publication order and pin, and **executes the build guard** (the step that refuses to publish a build that mentions the
 fox-hunting app, has the wrong base path, or lacks a file) in bash against scratch builds, including a case showing that the
-earlier negated `! grep` form let a mention through. The rest of the workflow cannot be run locally (it needs GitHub's
+earlier negated `! grep` form let a mention through. The whole file was also parsed with a real YAML parser before installation (GitHub rejected the first installed copy for an
+unquoted step name containing `: `, which the earlier text-only tests could not see); a test now checks for that mistake. The rest of the workflow cannot be run locally (it needs GitHub's
 runners and the real repositories), so its other YAML and shell steps are reviewed and structurally tested, not executed.
 
 ## Limitations (stated plainly)

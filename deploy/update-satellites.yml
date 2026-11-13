@@ -100,7 +100,7 @@ jobs:
         working-directory: planner
         run: npm ci
 
-      - name: Download fresh data (strict: any failure stops the run and writes nothing)
+      - name: 'Download fresh data (strict mode: any failure stops the run and writes nothing)'
         timeout-minutes: 8 # the command itself gives up after 6 minutes (--deadline-min 6 in package.json), so this is a backstop
         working-directory: planner
         run: npm run refresh-data:strict

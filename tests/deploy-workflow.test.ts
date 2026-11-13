@@ -226,3 +226,27 @@ describe('the pinned planner commit contains every approved app change', () => {
     }
   });
 });
+
+describe('YAML validity (GitHub rejected the first installed copy with "error in your yaml syntax on line 103")', () => {
+  // The repository has no YAML parser, so the one common way a hand-written workflow breaks is checked directly: an UNQUOTED value
+  // that contains ": " (a colon and a space) is read as a nested mapping and is a syntax error. The whole file was also parsed
+  // with a real YAML parser (yaml 2.x, installed in a scratch folder, not a repository dependency) before it was installed.
+  const offending = (text: string) =>
+    text.split('\n').filter((l) => {
+      const m = /^\s*(?:- )?(name|if|uses|working-directory|timeout-minutes|runs-on|cron|group): (.*)$/.exec(l);
+      if (!m) return false;
+      const value = m[2]!.replace(/\s+#.*$/, ''); // a trailing comment is not part of the value
+      return !/^['"|>]/.test(value) && value.includes(': ');
+    });
+  it('no unquoted name/if/uses value contains a colon followed by a space', () => {
+    expect(offending(yml)).toEqual([]);
+  });
+  it('the check catches the exact line that GitHub rejected', () => {
+    expect(offending('      - name: Download fresh data (strict: any failure stops the run and writes nothing)')).toHaveLength(1);
+    expect(offending("      - name: 'Download fresh data (strict mode: any failure stops the run)'")).toEqual([]);
+  });
+  it('every step name is present once the quoting is accounted for', () => {
+    expect(steps.some((s) => s.name.includes('Download fresh data'))).toBe(true);
+    expect(steps).toHaveLength(13);
+  });
+});
