@@ -13,7 +13,7 @@ import { validateDataFiles } from '../src/data/validate.ts';
 const args = process.argv.slice(2);
 const ageIdx = args.indexOf('--max-age-hours');
 const maxAge = ageIdx >= 0 ? Number(args[ageIdx + 1]) : 3;
-const dirArg = args.find((a, i) => !a.startsWith('--') && i !== ageIdx + 1);
+const dirArg = args.find((a, i) => !a.startsWith('--') && (ageIdx < 0 || i !== ageIdx + 1));
 const dir = dirArg ? resolve(dirArg) : join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'data');
 if (!Number.isFinite(maxAge) || maxAge <= 0) { console.error('--max-age-hours must be a positive number'); process.exit(2); }
 

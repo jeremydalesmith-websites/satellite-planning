@@ -1,0 +1,152 @@
+# PROPOSED, NOT ENABLED. This file lives in the planner repository only as a reviewable draft (see deploy/README.md).
+# It is meant to be copied, after the owner approves, to the WEBSITE repository as
+#   .github/workflows/update-satellites.yml        (branch: main)
+# It is deliberately NOT under .github/workflows here, so it cannot run from this repository.
+#
+# What it does, once a day and on demand ("Run workflow"):
+#   1. downloads fresh Keplers and activity reports with the planner's own refresh script (strict: all or nothing)
+#   2. validates the downloaded files, runs the planner's tests and builds the planner for /satellites/
+#   3. replaces ONLY the website's satellites/ folder with that build, then pushes one commit to main
+#   4. waits until the live site really serves the new data, and opens/updates an issue if anything failed
+# Nothing is pushed unless every earlier step succeeded, so a failure leaves the current publication untouched.
+
+name: Update satellites
+
+on:
+  schedule:
+    - cron: '17 9 * * *' # every 24 hours, 09:17 UTC (an off-the-hour minute; GitHub may delay scheduled runs)
+  workflow_dispatch: {} # manual "Run workflow" button in the Actions tab
+
+# One run at a time; a second run waits rather than racing the first.
+concurrency:
+  group: update-satellites
+  cancel-in-progress: false
+
+# No permissions by default; the job asks for exactly what it needs.
+permissions: {}
+
+env:
+  # The approved planner version: a PINNED COMMIT (not a branch), so the schedule always publishes exactly the code the
+  # owner approved and never whatever happens to be on a branch. To publish a newer planner version: change this SHA
+  # (a reviewed one-line commit to this file). See deploy/README.md.
+  PLANNER_REPO: jeremydalesmith-websites/satellite-planning
+  PLANNER_SHA: ea102b8c73c49f4c66e6226e49bab182c2b6b661
+  SITE_URL: https://k1kfx.com/satellites/
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write # push the satellites/ commit to main
+      issues: write # report a failure
+      pages: write # only used to request a Pages build if the automatic one is not seen (see "Confirm the site is live")
+    steps:
+      - name: Check out the website (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: site
+
+      - name: Check out the approved planner version
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PLANNER_REPO }}
+          ref: ${{ env.PLANNER_SHA }}
+          path: planner
+          persist-credentials: false # the planner checkout never gets a push credential
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: planner/package-lock.json
+
+      - name: Install the planner's locked dependencies
+        working-directory: planner
+        run: npm ci
+
+      - name: Download fresh data (strict: any failure stops the run and writes nothing)
+        working-directory: planner
+        run: npm run refresh-data:strict
+
+      - name: Validate the data (structure, freshness, completeness)
+        working-directory: planner
+        run: npm run validate-data
+
+      - name: Test and build the planner for /satellites/
+        working-directory: planner
+        run: |
+          npm test
+          npm run build:satellites # type-checks, then builds with base /satellites/
+
+      - name: Check the build before publishing
+        working-directory: planner
+        run: |
+          test -f dist/index.html
+          test -f dist/data/elements.json
+          test -f dist/data/status.json
+          grep -q '/satellites/assets/' dist/index.html
+          ! grep -rqi 'hunt' dist/index.html # the fox-hunting app is never referenced
+          node scripts/validate-data.ts dist/data # the files that will be published are the validated ones
+
+      - name: Replace ONLY the satellites/ folder
+        working-directory: site
+        run: |
+          mkdir -p satellites
+          rsync -a --delete ../planner/dist/ satellites/
+          git add -A -- satellites
+          # Guard: nothing outside satellites/ may be part of this commit (CNAME, hunt/, index.html, workflows ...).
+          outside=$(git diff --cached --name-only | grep -v '^satellites/' || true)
+          if [ -n "$outside" ]; then echo "::error::Refusing to publish: files outside satellites/ changed: $outside"; exit 1; fi
+          if git diff --cached --quiet; then echo "No change to publish."; echo "nochange=true" >> "$GITHUB_ENV"; fi
+
+      - name: Commit and push to main
+        if: env.nochange != 'true'
+        working-directory: site
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update satellite planner data (automated, planner ${PLANNER_SHA::7})"
+          pushed=false
+          for i in 1 2 3; do
+            # Rebase over any unrelated website commit made while this ran; only satellites/ is ours, so it is clean.
+            git pull --rebase origin main
+            if git push origin HEAD:main; then pushed=true; break; fi
+            sleep $((i * 10))
+          done
+          $pushed
+        # This push is made with the built-in GITHUB_TOKEN. It does not start this workflow again (no push trigger is
+        # configured, and GITHUB_TOKEN pushes never start workflow runs), so there is no loop.
+
+      - name: Confirm the site is live with the new data
+        if: env.nochange != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          want=$(jq -r .downloadedAt planner/dist/data/status.json)
+          url="${SITE_URL}data/status.json"
+          nudged=false
+          for i in $(seq 1 48); do # up to 12 minutes, every 15 seconds
+            got=$(curl -fsS -H 'Cache-Control: no-cache' "$url?cb=$(date +%s)" | jq -r .downloadedAt || true)
+            if [ "$got" = "$want" ]; then echo "Live: $url serves the data downloaded at $want"; exit 0; fi
+            # If GitHub Pages has not started building by itself after 3 minutes, ask it to. (The Pages build for a push
+            # made by GITHUB_TOKEN is expected, but not guaranteed, so the workflow checks instead of assuming.)
+            if [ "$i" -eq 12 ] && [ "$nudged" = false ]; then
+              gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" >/dev/null && echo "Requested a Pages build" || echo "Could not request a Pages build"
+              nudged=true
+            fi
+            sleep 15
+          done
+          echo "::error::The new data was committed but $url did not serve it within 12 minutes."
+          exit 1
+
+      - name: Tell the owner if anything failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Satellite data update failed"
+          body="The scheduled satellite update failed. The previously published planner and data are unchanged unless the failing step was the final live check. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"; else gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"; fi

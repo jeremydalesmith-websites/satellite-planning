@@ -75,7 +75,7 @@ the stated limitation or only partial automated coverage; **Not yet** = delibera
 | 2a | TypeScript, Vite, React, `satellite.js`, phone + desktop | Done | build, typecheck, browser check | Phone layout verified in a 390 px Chromium window only, not on real devices |
 | 2b | Static, GitHub Pages-compatible, configurable sub-directory | Done | `scripts/e2e-basepath.mjs`: 18/18 checks under `/satellites/` (relative and absolute base) and `/tools/sat/` | Not published; the mapping of `/satellites/` to this repository is a deployment-phase decision (see below) |
 | 2c | Local storage for preferences and saved events | Done | `ui` tests, browser reload check | Per-browser only; cleared if the user clears site data |
-| 2d | Scheduled GitHub Actions data refresh | **Not yet** | `scripts/refresh-data.ts` works by hand | No workflow in this phase (Phase 3, needs approval) |
+| 2d | Scheduled GitHub Actions data refresh | **Not yet** | `scripts/refresh-data.ts` works by hand | A draft daily workflow is in `deploy/` and is NOT enabled; it needs the owner's approval |
 | 2e | No Firebase/DB/auth/paid API/LLM; no secrets in frontend | Done | code review | The refresh script sends a generic User-Agent |
 | 3 | FM repeaters only, 2 m/70 cm cross-band, V/U and U/V; extensible internal model | Done | `planner` (catalog) | `ActivityKind` has one value today; SSTV etc. deliberately not built |
 | 4 | Inputs: location (manual + optional button), timezone, date range, min peak elevation, maximum cluster span, minimum passes (1 to 10), validation | Done* | `ui` (validation, defaults, geolocation never called unprompted), `availability` | Real browser geolocation not tested; minimum passes accepts 1 to 10; elevation limited to 5 to 85 degrees |
@@ -210,7 +210,8 @@ downloads: not `npm run dev`, `build`, `preview` or `test`, and not the browser.
 already-written `data/elements.json` and `data/status.json` from the site's own address, so pressing Search never
 fetches upstream data. A run makes one request for the orbital elements (retried up to three times on failure) and one
 status request per catalog repeater (17 today), spaced one second apart. No automatic refresh is configured: there is
-no workflow, scheduler or cron entry in the repository. See "Deployment prerequisites" above for what a hosted copy needs.
+no workflow, scheduler or cron entry in the repository. A proposed daily update for the live site is drafted, not enabled, in
+`deploy/` (see `deploy/README.md`). See "Deployment prerequisites" above for what a hosted copy needs.
 
 **Refresh behavior.** `scripts/refresh-data.ts` downloads and validates the first
 two sources and writes normalized `public/data/elements.json` and
