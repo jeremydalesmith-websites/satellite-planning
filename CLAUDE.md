@@ -89,20 +89,15 @@ serves http://localhost:5173/). Behind a proxy prefix with `NODE_USE_ENV_PROXY=1
 Independent prediction validation: see `docs/VALIDATION.md` (needs Python).
 
 ## Git and review workflow
-* **Never push directly to `main`.** Work on a `feature/<name>` branch, commit
-  in logical steps, push the branch, and open a pull request.
-* **Do not merge a pull request, enable GitHub Pages, deploy, add or run
-  deployment/scheduled workflows, or change DNS/domain settings without the
-  owner's explicit approval** for that specific action. Approval for one phase
-  does not carry over to the next.
-* Work in the agreed phases; when a phase is ready, summarise and stop for review.
-* Do not add GitHub Actions workflows unless the current phase's approval says so.
-* The owner's existing website and domain (`k1kfx.com`) are not part of this
-  repository: do not modify them or assume the domain is dedicated to this app.
-  Intended public URL: `https://k1kfx.com/satellites/`; a separate fox-hunting app
-  lives at `/hunt` and must never be read, linked, or overwritten. Keep the base path
-  configurable (`VITE_BASE_PATH` / `--base`, default relative). How `/satellites/` maps
-  to this repository is undecided and needs the owner's approval in the deployment phase.
+* **Keep publishing simple.** Work on `main` in this folder; the owner commits and pushes with GitHub Desktop. There is
+  no pinned commit, no deploy token and no pull-request step. The app is published with `publish.bat` (tests, build, copy into
+  the local website folder's `satellites/`); the data is refreshed by one small scheduled workflow in the website repository
+  (see README, "How the live site is published"). Do not add machinery to this without the owner asking for it.
+* **Do not push, publish, run or change workflows, delete branches, or change DNS/domain settings without the owner's
+  explicit approval** for that specific action.
+* The owner's website repository (`k1kfx.com`) is separate: only its `satellites/` folder and its one data workflow belong
+  to this app. A separate fox-hunting app lives at `/hunt` and must never be read, linked, or overwritten; the rest of the
+  site is off-limits too. Keep the base path configurable (`VITE_BASE_PATH` / `--base`, default relative).
 * Install with `npm ci` (locked versions), not `npm install`, unless changing dependencies.
 * AMSAT status reports are matched to the exact `_[FM]` entry; other modes and beacon-only
   reports must never establish repeater availability (see README).

@@ -75,7 +75,7 @@ the stated limitation or only partial automated coverage; **Not yet** = delibera
 | 2a | TypeScript, Vite, React, `satellite.js`, phone + desktop | Done | build, typecheck, browser check | Phone layout verified in a 390 px Chromium window only, not on real devices |
 | 2b | Static, GitHub Pages-compatible, configurable sub-directory | Done | `scripts/e2e-basepath.mjs`: 18/18 checks under `/satellites/` (relative and absolute base) and `/tools/sat/` | Not published; the mapping of `/satellites/` to this repository is a deployment-phase decision (see below) |
 | 2c | Local storage for preferences and saved events | Done | `ui` tests, browser reload check | Per-browser only; cleared if the user clears site data |
-| 2d | Scheduled GitHub Actions data refresh | **Not yet** | `scripts/refresh-data.ts` works by hand | A draft daily workflow is in `deploy/` and is NOT enabled; it needs the owner's approval |
+| 2d | Scheduled GitHub Actions data refresh | Done | a small workflow in the website repository runs `scripts/refresh-data.ts` on a schedule (see "How the live site is published") | GitHub may delay or skip a scheduled run; the workflow also has a manual button |
 | 2e | No Firebase/DB/auth/paid API/LLM; no secrets in frontend | Done | code review | The refresh script sends a generic User-Agent |
 | 3 | FM repeaters only, 2 m/70 cm cross-band, V/U and U/V; extensible internal model | Done | `planner` (catalog) | `ActivityKind` has one value today; SSTV etc. deliberately not built |
 | 4 | Inputs: location (manual + optional button), timezone, date range, min peak elevation, maximum cluster span, minimum passes (1 to 10), validation | Done* | `ui` (validation, defaults, geolocation never called unprompted), `availability` | Real browser geolocation not tested; minimum passes accepts 1 to 10; elevation limited to 5 to 85 degrees |
@@ -144,6 +144,21 @@ phone layout, with screenshots) and `scripts/e2e-basepath.mjs` (sub-path behavio
 
 ## Deployment and base path
 
+### How the live site is published
+
+The live copy is the `satellites/` folder of the website repository (`k1kfx.com`, GitHub Pages, published from `main`).
+There are two independent parts, and neither needs a token, a pinned commit or a pull request:
+
+* **The app** is published by hand, rarely. Double-click `publish.bat` in this folder: it runs the tests, builds for
+  `/satellites/` and copies the build into the local website folder's `satellites/` (never anything else, and never
+  `satellites/data/`). Then commit and push the website repository with GitHub Desktop.
+* **The data** (`satellites/data/elements.json` and `status.json`) is refreshed automatically by the website repository's
+  workflow `.github/workflows/update-satellites.yml`, a few times a day and from its "Run workflow" button. It checks out this
+  repository's `main`, runs `npm run refresh-data:strict` and `npm run validate-data`, and commits only those two files.
+  If a download or the validation fails, nothing is committed and the previous data stays published. The page reads the
+  data files on every load, so new data needs no rebuild.
+
+
 > **Not published and not enabled.** This repository has **no GitHub Actions workflows**,
 > Pages is not enabled, and no domain or DNS is configured. A refresh-and-deploy workflow is a
 > later phase that needs your approval.
@@ -209,9 +224,8 @@ The data refresh (`npm run refresh-data`) needs no secrets or API keys.
 downloads: not `npm run dev`, `build`, `preview` or `test`, and not the browser. The browser only loads the
 already-written `data/elements.json` and `data/status.json` from the site's own address, so pressing Search never
 fetches upstream data. A run makes one request for the orbital elements (retried up to three times on failure) and one
-status request per catalog repeater (17 today), spaced one second apart. No automatic refresh is configured: there is
-no workflow, scheduler or cron entry in the repository. A proposed daily update for the live site is drafted, not enabled, in
-`deploy/` (see `deploy/README.md`). See "Deployment prerequisites" above for what a hosted copy needs.
+status request per catalog repeater (17 today), spaced one second apart. There is no workflow, scheduler or cron entry in this repository. The live site's copies are refreshed by a small scheduled
+workflow in the website repository (see "How the live site is published").
 
 **Refresh behavior.** `scripts/refresh-data.ts` downloads and validates the first
 two sources and writes normalized `public/data/elements.json` and
@@ -237,8 +251,7 @@ attributed in the app. Callsigns are not stored in the published file
 (reports keep only a time, a value, and an anonymous per-file operator index).
 
 **Updates while a page is open.** Each build writes `version.json` and compiles the same code id into the page. When a search
-starts, the page makes one small request for it; if the published planner has changed it says to reload instead of failing
-(see `deploy/README.md`). The data is read once per page load and never refreshes by itself.
+starts, the page makes one small request for it; if the published planner has changed it says to reload instead of failing. The data is read once per page load and never refreshes by itself.
 
 **Limitation, stated plainly:** the frequency/restriction catalog is manual. The
 app labels those notes "manual catalog note, not live" with the source page's
