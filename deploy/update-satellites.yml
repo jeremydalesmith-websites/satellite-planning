@@ -6,9 +6,16 @@
 # What it does, once a day and on demand ("Run workflow"):
 #   1. downloads fresh Keplers and activity reports with the planner's own refresh script (strict: all or nothing)
 #   2. validates the downloaded files, runs the planner's tests and builds the planner for /satellites/
-#   3. replaces ONLY the website's satellites/ folder with that build, then pushes one commit to main
+#   3. replaces ONLY the website's satellites/ folder with that build and pushes one commit to main
 #   4. waits until the live site really serves the new data, and opens/updates an issue if anything failed
 # Nothing is pushed unless every earlier step succeeded, so a failure leaves the current publication untouched.
+#
+# WHY THE PUSH USES A SECRET TOKEN (GitHub's documentation: "Commits pushed by a GitHub Actions workflow that uses the
+# GITHUB_TOKEN do not trigger a GitHub Pages build"). The site is published from the main branch, so a push made with the
+# built-in token would update the files but NOT the live site. The push is therefore made with a fine-grained personal
+# access token (secret SITE_PUSH_TOKEN) restricted to this one repository and to Contents: read and write. A push made
+# with it is an ordinary push, which is what GitHub says starts the Pages build. The built-in token keeps read-only access
+# to contents; it only opens the failure issue.
 
 name: Update satellites
 
@@ -30,7 +37,7 @@ env:
   # owner approved and never whatever happens to be on a branch. To publish a newer planner version: change this SHA
   # (a reviewed one-line commit to this file). See deploy/README.md.
   PLANNER_REPO: jeremydalesmith-websites/satellite-planning
-  PLANNER_SHA: ea102b8c73c49f4c66e6226e49bab182c2b6b661
+  PLANNER_SHA: 392261c6157d850a4f8a156e7288eff647cce195
   SITE_URL: https://k1kfx.com/satellites/
 
 jobs:
@@ -38,15 +45,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
-      contents: write # push the satellites/ commit to main
+      contents: read # the built-in token cannot push; the push uses SITE_PUSH_TOKEN
       issues: write # report a failure
-      pages: write # only used to request a Pages build if the automatic one is not seen (see "Confirm the site is live")
     steps:
+      - name: Check that the push token is configured
+        env:
+          SITE_PUSH_TOKEN: ${{ secrets.SITE_PUSH_TOKEN }}
+        run: |
+          if [ -z "$SITE_PUSH_TOKEN" ]; then
+            echo "::error::The secret SITE_PUSH_TOKEN is not set. Without it a push would not publish the site (see the comment at the top of this file)."
+            exit 1
+          fi
+
       - name: Check out the website (main)
         uses: actions/checkout@v4
         with:
           ref: main
           path: site
+          token: ${{ secrets.SITE_PUSH_TOKEN }} # used again by "git push" below
 
       - name: Check out the approved planner version
         uses: actions/checkout@v4
@@ -84,6 +100,7 @@ jobs:
         working-directory: planner
         run: |
           test -f dist/index.html
+          test -f dist/version.json
           test -f dist/data/elements.json
           test -f dist/data/status.json
           grep -q '/satellites/assets/' dist/index.html
@@ -101,7 +118,7 @@ jobs:
           if [ -n "$outside" ]; then echo "::error::Refusing to publish: files outside satellites/ changed: $outside"; exit 1; fi
           if git diff --cached --quiet; then echo "No change to publish."; echo "nochange=true" >> "$GITHUB_ENV"; fi
 
-      - name: Commit and push to main
+      - name: Commit and push to main (with the secret token, so Pages builds)
         if: env.nochange != 'true'
         working-directory: site
         run: |
@@ -116,29 +133,19 @@ jobs:
             sleep $((i * 10))
           done
           $pushed
-        # This push is made with the built-in GITHUB_TOKEN. It does not start this workflow again (no push trigger is
-        # configured, and GITHUB_TOKEN pushes never start workflow runs), so there is no loop.
+        # This workflow has no push trigger, so its own push cannot start it again.
 
       - name: Confirm the site is live with the new data
         if: env.nochange != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           want=$(jq -r .downloadedAt planner/dist/data/status.json)
           url="${SITE_URL}data/status.json"
-          nudged=false
           for i in $(seq 1 48); do # up to 12 minutes, every 15 seconds
             got=$(curl -fsS -H 'Cache-Control: no-cache' "$url?cb=$(date +%s)" | jq -r .downloadedAt || true)
             if [ "$got" = "$want" ]; then echo "Live: $url serves the data downloaded at $want"; exit 0; fi
-            # If GitHub Pages has not started building by itself after 3 minutes, ask it to. (The Pages build for a push
-            # made by GITHUB_TOKEN is expected, but not guaranteed, so the workflow checks instead of assuming.)
-            if [ "$i" -eq 12 ] && [ "$nudged" = false ]; then
-              gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" >/dev/null && echo "Requested a Pages build" || echo "Could not request a Pages build"
-              nudged=true
-            fi
             sleep 15
           done
-          echo "::error::The new data was committed but $url did not serve it within 12 minutes."
+          echo "::error::The new data was pushed to main but $url did not serve it within 12 minutes. Check the Pages build in the Actions tab; push an empty commit or re-run this workflow to retry."
           exit 1
 
       - name: Tell the owner if anything failed

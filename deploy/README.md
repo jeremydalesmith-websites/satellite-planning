@@ -8,32 +8,71 @@ owner approves that specific change.
 
 The planner is live at `https://k1kfx.com/satellites/` because its built output is copied into the `satellites/` folder
 of the website repository (`k1kfx.com`, branch `main`), which GitHub Pages serves ("deploy from a branch"). The workflow
-keeps that arrangement: no Cloudflare project, no DNS change, no new hosting, no backend, no public "Update now" button,
-and no polling in the browser. It automates the copy that is now done by hand with GitHub Desktop.
+keeps that arrangement: no Cloudflare project, no DNS change, no change of Pages source, no backend, no public "Update
+now" button, and no polling in the browser. It automates the copy that is now done by hand with GitHub Desktop.
 
 ## What one run does
 
 Every 24 hours (09:17 UTC) and whenever the owner presses **Run workflow** in the website repo's Actions tab:
 
-1. Checks out the website (`main`) and the **approved planner version** (see below).
-2. `npm ci`, then `npm run refresh-data:strict`: downloads fresh Keplers (AMSAT `nasabare.txt`, one request) and
+1. Stops at once, with a clear message, if the push token secret is missing.
+2. Checks out the website (`main`) and the **approved planner version** (see below).
+3. `npm ci`, then `npm run refresh-data:strict`: downloads fresh Keplers (AMSAT `nasabare.txt`, one request) and
    activity reports (17 spaced requests) with the planner's existing refresh code. Strict means **all or nothing**: if
-   anything fails, nothing is written and the run stops.
-3. `npm run validate-data`: both files well formed; downloaded within the last 3 hours; every catalog satellite has
-   orbital data; every repeater has a status entry with no recorded failure; the reports are not empty or future-dated.
-4. `npm test` (no network), then `npm run build:satellites` (type-check, then a build with base `/satellites/`), then
+   any request fails or returns a malformed response, nothing is written and the run stops.
+4. `npm run validate-data`: both files well formed; downloaded within the last 3 hours; every catalog satellite has
+   orbital data; every repeater has a status entry with no recorded failure; no report dated in the future.
+5. `npm test` (no network), then `npm run build:satellites` (type-check, then a build with base `/satellites/`), then
    checks of the built output, including a second validation of the exact files that will be published.
-5. Replaces **only** `satellites/` in the website checkout (`rsync --delete` from `dist/`), then refuses to continue if
+6. Replaces **only** `satellites/` in the website checkout (`rsync --delete` from `dist/`), then refuses to continue if
    Git sees any changed path outside `satellites/` (so `hunt/`, `CNAME`, `index.html` and every other page are safe).
-6. Commits as `github-actions[bot]` and pushes to `main` (rebasing over any unrelated website commit made meanwhile).
-7. Polls the live site until `…/satellites/data/status.json` shows the new download time (up to 12 minutes; after 3
-   minutes it asks GitHub Pages to build, if it has not started by itself).
-8. On any failure, opens (or comments on) one issue titled "Satellite data update failed" with a link to the run.
+7. Commits as `github-actions[bot]` and pushes to `main` **using the push token** (rebasing over any unrelated website
+   commit made meanwhile).
+8. Polls the live site until `…/satellites/data/status.json` shows the new download time (up to 12 minutes).
+9. On any failure, opens (or comments on) one issue titled "Satellite data update failed" with a link to the run.
 
-Because the push is the **last** step and every check precedes it, a failed download, validation, test or build leaves
-the current publication exactly as it was. (If only step 7 fails, the new data was pushed but not seen live; the issue
-says so.) A run does not start itself again: there is no `push` trigger, and pushes made with the built-in token never
-start workflow runs.
+Because the push is the **last** step before the live check and every earlier step must succeed, a failed download,
+validation, test or build leaves the current publication exactly as it was. This is tested with the real scripts (see
+"Failure behaviour, tested" below). A run does not start itself again: there is no `push` trigger.
+
+### Activity reports: "no reports" is not a failure
+
+A repeater whose status response is well formed but contains no reports is a **successful** answer. Its entry is stored
+with an empty list, it has no "Heard" report, so it stays **ineligible**, and it does not stop the other repeaters' data
+from being published. Even if every repeater answered "no reports", the update still publishes (validation prints a
+warning) and nothing becomes eligible. What does stop the run is a **failed or malformed** response: an HTTP error or
+timeout (after three tries), invalid JSON, a body without the expected `data` list, or rows for the repeater that cannot
+be read at all. A permanent failure for one repeater (for example AMSAT renaming a status key, which answers
+"satellite not found") therefore blocks publication and raises the issue until the catalog is corrected; that was chosen
+deliberately because a missing answer cannot be told apart from a wrong key. Download times are the true time of the
+successful download and are never advanced by a failed one.
+
+## How the push publishes the site (checked, not assumed)
+
+* **Documented by GitHub:** "Commits pushed by a GitHub Actions workflow that uses the `GITHUB_TOKEN` do not trigger a
+  GitHub Pages build" (docs.github.com, *Configuring a publishing source for your GitHub Pages site*). This planner's site
+  is published from the `main` branch, so a bot push using the built-in token would update the files **without
+  publishing**. The earlier draft's assumption that it might is removed.
+* **Proposed mechanism:** the push is made with a **fine-grained personal access token**, stored as the repository secret
+  `SITE_PUSH_TOKEN`, so it is an ordinary push by an authorised user, which is the case GitHub documents as starting the
+  Pages build. This keeps the branch-based setup exactly as it is.
+  * Created by the owner (the token is never shown to anyone else): GitHub → Settings → Developer settings →
+    Fine-grained tokens; resource owner = the account that owns the `k1kfx.com` repository; **only that repository**;
+    repository permissions **Contents: Read and write** (Metadata read is added automatically); nothing else.
+  * It has an expiry (choose up to one year and set a calendar reminder). When it expires the push fails, the run fails
+    visibly, and the issue is opened; creating a new token and updating the secret fixes it.
+  * The built-in `GITHUB_TOKEN` is reduced to `contents: read` and `issues: write`.
+* **Not relied on: the "Request a GitHub Pages build" API** (`POST /repos/{owner}/{repo}/pages/builds`). Verified from
+  GitHub's documentation: it builds "from the latest revision on the default branch" with "the same effect as pushing a
+  commit"; requests are limited to one concurrent build per repository and per requester (extra ones are queued); a
+  fine-grained token needs the repository permission **Pages: write**. GitHub does **not** document whether the built-in
+  `GITHUB_TOKEN` (`pages: write`) may call it, so the earlier draft's use of it is removed. It remains a possible manual
+  recovery with the owner's own token, nothing more.
+* **Also not proposed:** switching the site to publish from a GitHub Actions workflow (the other documented mechanism).
+  That changes the existing hosting setup (new Pages source, deployment environment), which was not asked for.
+* **Still unproven in practice:** that a push with this token builds the site in this particular repository has not been
+  observed, because nothing is enabled. The live check (step 8) is the proof: if the first run finishes green, it
+  worked. The owner should run it once by hand after enabling it and watch.
 
 ## Which planner version is published (important)
 
@@ -42,38 +81,39 @@ feature branch, and they must not silently build a stale or unapproved branch. S
 
 * The workflow lives in the **website** repo's `main`, which is what a schedule runs.
 * It does **not** build "whatever the planner's default branch is". The planner's `main` still holds only the initial
-  commit, and the approved code (Sort by, single passes, strict eligibility) is on `feature/strict-eligibility`,
-  unmerged. The workflow instead checks out **one pinned commit**, `PLANNER_SHA` at the top of the file. Today that is
-  `ea102b8c73c49f4c66e6226e49bab182c2b6b661`, the commit containing the Sort by work and the refresh/validation tooling.
-* Nothing is merged for this. The pinned commit only has to exist in the (public) planner repository, which it will
-  once the branch is pushed.
-* To publish a newer planner version later, change `PLANNER_SHA` in a reviewed one-line commit to the website repo, or
-  press Run workflow after doing so. A planner change is therefore always a deliberate act, never a side effect of the
-  daily schedule. (Merging PR #1 and PR #2 is a separate decision; after it, the pin could instead track `main`.)
-
-## How a bot push reaches the live site (checked, not assumed)
-
-GitHub Pages is built-in "pages build and deployment" (event `dynamic`), run by GitHub when `main` changes. GitHub's
-documentation says events created with `GITHUB_TOKEN` do not start new workflow runs; it is not documented whether that
-covers the Pages build, so this must not be assumed. The workflow therefore **verifies** (step 7) that the site serves
-the new download time, requests a Pages build through the API if needed (`pages: write`), and fails visibly otherwise.
-If that proves unreliable in practice, the alternative is a fine-grained personal access token limited to the website
-repo (`Contents: read and write`) stored as a secret and used by the checkout; that is **not** proposed unless needed,
-because it adds a credential to manage.
+  commit, and the approved code is on `feature/strict-eligibility`, unmerged. The workflow instead checks out **one
+  pinned commit**, `PLANNER_SHA` at the top of the file, currently `392261c6157d850a4f8a156e7288eff647cce195`, the commit
+  containing everything described here (it must be pushed to the planner repository first so the pin exists remotely).
+* Nothing is merged for this. To publish a newer planner version later, change `PLANNER_SHA` in a reviewed one-line commit
+  to the website repo. A planner change is always a deliberate act, never a side effect of the daily schedule. (Merging
+  the planner pull requests is a separate decision; after it, the pin could instead track `main`.)
 
 ## Required settings, secrets and cost
 
-* **Secrets: none.** The built-in `GITHUB_TOKEN` is used. No credentials appear anywhere in browser code.
-* **Permissions** (job level; the default is none): `contents: write` (push to `main`), `issues: write` (failure issue),
-  `pages: write` (only to request a Pages build). Check in the website repo: *Settings → Actions → General →
-  Workflow permissions* must allow workflows to be granted write access (the job requests it explicitly, but an
-  organisation or repo policy of "read-only" would block it).
-* **Branch protection:** `main` is unprotected today. If rules are added later that require pull requests, the push in
-  step 6 will fail (visibly) and would need an exception or the token alternative above.
+* **Secret: `SITE_PUSH_TOKEN`** (website repo → Settings → Secrets and variables → Actions). Nothing else. No credentials
+  appear in browser code.
+* **Workflow permissions** (job level; the default is none): `contents: read`, `issues: write`. If the repository or its
+  owner sets default workflow permissions to read-only, that is fine; the job asks for what it needs explicitly.
+* **Branch protection:** `main` is unprotected today. If rules are added later that require pull requests, the push will
+  fail visibly and need an exception.
 * **Cost:** free for a public repository (standard runners); a run takes about 2 to 4 minutes (the 17 status requests are
-  spaced by one second each, on purpose). AMSAT is asked for 18 requests a day, far below its polling guidance.
-* **Third-party actions:** `actions/checkout@v4` and `actions/setup-node@v4` (GitHub's own), referenced by version tag.
-  Pinning them to commit SHAs is a possible hardening.
+  spaced one second apart, on purpose). AMSAT is asked for 18 requests a day, far below its polling guidance.
+* **Third-party actions:** `actions/checkout@v4` and `actions/setup-node@v4` (GitHub's own), by version tag. Pinning them
+  to commit SHAs is a possible hardening.
+
+## Failure behaviour, tested
+
+`tests/refresh-failure-paths.test.ts` runs the **real** `refresh-data.ts` and `validate-data.ts` as child processes against
+a stubbed network, in the workflow's order (refresh strict, validate, publish), each step running only if the previous one
+exited 0, as GitHub Actions stops a job at its first failed step. A folder stands in for the published
+`satellites/data/` files. For each of these failures the published `elements.json` and `status.json` are **byte-for-byte
+unchanged**, and the scratch copies too when the refresh itself fails: a status request failing with HTTP 503, a status
+response with no `data` list, a status response whose rows cannot be read, the orbital download failing, and validation
+refusing the data (a report dated in the future). Further tests show a successful run replaces both files with times from
+that run, that the non-strict local run never advances the status time after a failed status download, and that
+"no reports" (one repeater, or all) is published and leaves those repeaters ineligible. This covers the data files; the
+workflow file itself cannot be run locally (it needs GitHub's runners and the real repositories), so its YAML and shell
+steps are reviewed, not executed.
 
 ## Limitations (stated plainly)
 
@@ -81,28 +121,50 @@ because it adds a credential to manage.
   activity reports show their "over 24 hours old" notice for a short time before the next update lands. The cadence
   asked for is 24 hours; every 12 hours would remove that edge case at the cost of 18 more AMSAT requests a day.
 * GitHub disables scheduled workflows after 60 days without repository activity. The daily commit is itself activity, so
-  it should keep itself alive, but this has not been observed; a failure issue will not appear if GitHub simply stops
-  scheduling. Run workflow re-enables it.
+  it should keep itself alive, but this has not been observed; no issue appears if GitHub simply stops scheduling. Run
+  workflow re-enables it.
 * A run only proves the data is fresh and valid. It cannot tell whether an amateur-radio repeater is actually working;
   that still comes only from volunteer reports (the 72-hour rule is unchanged).
-* The daily commits add about 25 KB (data) to the website repo's history each day; code changes add a new build.
+* The daily commits add about 25 KB (data) to the website repo's history each day; a code change adds a new build.
 
-## Caching and what visitors see
+## Caching, and what an open tab does
 
 * Pages serves files with `Cache-Control: max-age=600`: a browser or CDN may reuse a copy for up to 10 minutes.
 * The planner fetches `data/elements.json` and `data/status.json` with `cache: 'no-cache'`, which forces the browser to
-  revalidate them against the server on every page load, so a **new or refreshed page** gets the current data as soon as
-  Pages has published it. The page itself (`index.html`) may be up to 10 minutes old from a cache, but it only names the
-  scripts; the data is fetched fresh.
+  revalidate them on every page load, so a **new or reloaded page** gets the current data as soon as Pages has published
+  it. The page itself (`index.html`) may be up to 10 minutes old from a cache.
 * **A tab left open across an update does not refresh itself.** The data is read once, when the page loads. There is no
-  polling, timer or service worker. The freshness line ("Keplers updated … · Activity reports updated …") is computed from the loaded
-  data's own download times each time a search runs, so a search in an old tab honestly reports older data (and the
-  "over 24 hours old" notice) instead of pretending to be newer. Reloading the page loads the new data.
-* Data-only updates keep the same script file names (they are content-hashed), so an open tab keeps working. When the
-  planner **code** is bumped (`PLANNER_SHA`), old hashed files are removed from `satellites/`; a tab that was open before
-  that update may fail on its next search (the calculation script no longer exists under its old name) until reloaded.
+  polling, timer or service worker. The freshness line is computed from the loaded data's own download times each time a
+  search runs, so a search in an old tab honestly reports older data instead of pretending to be newer.
+* **Data-only updates are harmless to an open tab:** script file names are content-hashed and the code is the same, so the
+  tab keeps working with the data it already has.
+
+### The open-tab failure, explained, and how it is now handled
+
+The calculation runs in a separate script (`assets/predict.worker-<hash>.js`) that the page requests **when you press
+Search**, not when it opens. When the planner **code** is bumped (`PLANNER_SHA` changes), the update replaces
+`satellites/` and removes the old hashed files. A tab that was opened before that update still holds the old page, so
+its next search asked for a script file that no longer exists. Before, that ended in a generic "The calculation
+failed" message. A cached copy of the page (up to 10 minutes old) opened just after an update could even point at a
+removed app script and show a blank page. Now:
+
+1. Every build writes `version.json` (`{"build": "<code commit>"}`) beside the app and compiles the same id into the
+   page. When a search starts, the page makes **one** small, uncached request for `version.json`; if the published build
+   differs it stops and says: *"A newer version of the planner has been published since this page was opened. Reload the
+   page to use it. Nothing was calculated."* This is a single request on a user action, not polling. If the file is
+   missing, the network is down, or the page is a development build, the check says nothing and the search proceeds.
+2. If the calculation script still cannot be loaded, the error reads: *"The calculation script could not be loaded. The
+   planner was probably updated after this page was opened. Reload the page and try again."*
+3. If the app script itself is missing (a stale cached page), a small built-in fallback replaces the blank page with
+   *"The planner could not be loaded. It was probably just updated: reload the page (Ctrl+F5 if it still fails)."*
+4. If newly published data has a format an old page does not understand, the data-problem message adds "if the planner
+   was just updated, reload the page".
+
+All four were exercised in a real browser (a doctored `version.json`, a blocked worker script, a blocked app script) and by
+automated tests. Data-only updates keep the same build id, so they do not trigger the "newer version" message.
 
 ## Rollback
 
 Revert the bot commit in the website repo (GitHub Desktop or the web UI) and Pages republishes the previous folder. To
-stop the automation, disable the workflow in the Actions tab or delete the file; nothing else depends on it.
+stop the automation, disable the workflow in the Actions tab or delete the file, and delete the token; nothing else
+depends on it.
