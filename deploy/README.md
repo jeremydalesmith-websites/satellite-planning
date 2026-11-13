@@ -124,8 +124,8 @@ feature branch, and they must not silently build a stale or unapproved branch. S
 * The workflow lives in the **website** repo's `main`, the branch GitHub uses for any schedule added later (a schedule always
   runs the default branch's copy of the file).
 * It does **not** build "whatever the planner's default branch is". The planner's `main` still holds only the initial
-  commit, and the approved code is on `feature/strict-eligibility`, unmerged. The workflow instead checks out **one
-  pinned commit**, `PLANNER_SHA` at the top of the file, currently `aff62d0ba20c1ab26d12a1b6a9e051bcd1a26a56`, the commit
+  commit, and the approved code is on `feature/calendar-export-ui`, unmerged. The workflow instead checks out **one
+  pinned commit**, `PLANNER_SHA` at the top of the file, currently `de3911e978c142624d154b52b60af4cce5c862c1`, the commit
   containing everything described here (it must be pushed to the planner repository first so the pin exists remotely).
 * Nothing is merged for this. To publish a newer planner version later, change `PLANNER_SHA` in a reviewed one-line commit
   to the website repo. A planner change is always a deliberate act, never a side effect of a run, manual or scheduled. (Merging
