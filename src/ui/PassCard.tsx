@@ -40,17 +40,21 @@ export function PassCard({ pass: p, role, tz, overlapNames, statusDownloadedAt }
       <header>
         <h4>{p.name}</h4>
         <span className="badge band" title={describeBands(act)}>{compactBands(act)}</span>
-        {p.sunlightRestricted && (
-          <span className="badge restrict" title="This repeater is asked not to be used in eclipse. Only sunlight at the satellite matters, not local darkness.">
-            Sunlit only{p.sunlight === 'partly-eclipsed' ? ' · partly in shadow' : ''}
-          </span>
-        )}
-        {act.interruptible && (
-          <span className="badge restrict" title="Normally operating, but may be switched off by operations on its platform. See Details.">
-            {act.interruptibleBadge ?? 'Subject to interruptions'}
-          </span>
-        )}
-        {role !== 'counted' && <span className={`role ${role}`}>{ROLE_LABEL[role]}</span>}
+        {/* Any extra badges and the role label sit in the right column, so the band badge in the middle column is centered
+            whether or not there is anything beside it (see .pass header in styles.css). */}
+        <span className="pass-flags">
+          {p.sunlightRestricted && (
+            <span className="badge restrict" title="This repeater is asked not to be used in eclipse. Only sunlight at the satellite matters, not local darkness.">
+              Sunlit only{p.sunlight === 'partly-eclipsed' ? ' · partly in shadow' : ''}
+            </span>
+          )}
+          {act.interruptible && (
+            <span className="badge restrict" title="Normally operating, but may be switched off by operations on its platform. See Details.">
+              {act.interruptibleBadge ?? 'Subject to interruptions'}
+            </span>
+          )}
+          {role !== 'counted' && <span className={`role ${role}`}>{ROLE_LABEL[role]}</span>}
+        </span>
       </header>
       {why && <p className="why">{why}</p>}
       <dl className="key">

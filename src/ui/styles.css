@@ -96,7 +96,7 @@ form > button.primary { width: 100%; margin-top: 8px; font-size: 1.05rem; }
 .fresh dt { color: var(--muted); }
 .fresh dd { margin: 0; }
 .warn-row dd { color: var(--warn); }
-.event header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.event > header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
 .rank { margin: 0; font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .when { margin: 2px 0 0; }
 .summary { margin: 12px 0; }
@@ -115,11 +115,22 @@ summary { cursor: pointer; padding: 8px 0; min-height: 44px; font-weight: 600; }
 .pass { border: 1px solid var(--border); border-left: 5px solid var(--counted); border-radius: 10px; padding: 10px 12px; margin: 8px 0; background: var(--bg); }
 .pass.alternative { border-left-color: var(--alt); }
 .pass.edge, .pass.excluded { border-left-color: var(--bad); }
-.pass header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* Pass card header: name | band badge | extra badges. The band badge is ALWAYS the centered middle column, so a card with an
+   extra status badge (ISS, AO-91) and one without (SO-50) line up the same way. On narrow screens the badge moves to its own
+   centered row under the name. */
+.pass header { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; column-gap: 8px; row-gap: 6px; }
+.pass header > h4 { grid-column: 1; }
+.pass header > .badge.band { grid-column: 2; justify-self: center; }
+.pass-flags { grid-column: 3; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; min-width: 0; }
+@media (max-width: 520px) {
+  .pass header { grid-template-columns: minmax(0, 1fr) auto; }
+  .pass header > .badge.band { grid-column: 1 / -1; grid-row: 2; }
+  .pass-flags { grid-column: 2; grid-row: 1; }
+}
 .pass h4 { font-size: 1.05rem; margin-right: 4px; }
 .badge { font-size: .75rem; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; background: var(--surface); }
 .badge.band { font-weight: 700; }
-.role { margin-left: auto; font-size: .75rem; font-weight: 700; }
+.role { font-size: .75rem; font-weight: 700; }
 .role.counted { color: var(--ok); } .role.alternative { color: var(--muted); } .role.edge, .role.excluded { color: var(--bad); }
 .why { margin: 4px 0; font-weight: 500; }
 .bands { margin: 2px 0 6px; color: var(--muted); font-size: .9rem; }
