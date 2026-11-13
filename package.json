@@ -11,7 +11,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "refresh-data": "node scripts/refresh-data.ts",
-    "refresh-data:strict": "node scripts/refresh-data.ts --strict",
+    "refresh-data:strict": "node scripts/refresh-data.ts --strict --deadline-min 6",
     "validate-data": "node scripts/validate-data.ts",
     "build:satellites": "tsc --noEmit && vite build --base=/satellites/"
   },

@@ -44,10 +44,10 @@ function run(script: string, args: string[], env: Record<string, string>) {
 }
 
 /** refresh --strict, then validate, then publish; stops at the first failure. Returns where it stopped. */
-function workflow(mode: string) {
+function workflow(mode: string, extraEnv: Record<string, string> = {}) {
   const { scratch, site } = folders();
   const before = { scratch: read(scratch), site: read(site) };
-  const env = { STUB_MODE: mode, SAT_PLANNER_DATA_DIR: scratch };
+  const env = { STUB_MODE: mode, SAT_PLANNER_DATA_DIR: scratch, ...extraEnv };
   const startedAt = Date.now();
   let stoppedAt: string | null = null;
   const refresh = run('refresh-data.ts', ['--strict'], env);
@@ -115,4 +115,22 @@ describe('"no reports" is a valid answer, not a failure', () => {
     const status = JSON.parse(r.after.site['status.json']!) as StatusFile;
     expect(evaluateEligibility(status, Date.now()).every((x) => !x.eligible)).toBe(true);
   }, 90_000);
+});
+
+describe('a stalled download cannot outlast the deadline', () => {
+  // Without a deadline a stalled server would hold each request for its own 30 s limit, three tries each, 18 requests: far longer
+  // than any job limit. With the deadline the script ends as an ordinary, reported failure and writes nothing.
+  for (const mode of ['status-hang', 'elements-hang'] as const) {
+    it(`${mode}: the run fails by itself within the deadline, nothing is written, published files are unchanged`, () => {
+      const t0 = Date.now();
+      const r = workflow(mode, { SAT_PLANNER_DEADLINE_MS: '1500' });
+      const took = Date.now() - t0;
+      expect(r.stoppedAt).toBe('refresh');
+      expect(r.refresh.code).toBe(1); // a normal failure exit, not a kill
+      expect(r.refresh.out).toMatch(/deadline exceeded/);
+      expect(took).toBeLessThan(15_000); // would be minutes without the deadline
+      expect(r.after.site).toEqual(r.before.site);
+      expect(r.after.scratch).toEqual(r.before.scratch);
+    }, 60_000);
+  }
 });

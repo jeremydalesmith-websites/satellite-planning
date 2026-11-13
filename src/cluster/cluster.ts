@@ -17,8 +17,8 @@
  * This is conservative: two passes that overlap only at low elevation are not counted together.
  *
  * SINGLE-PASS MODE (minimum passes = 1): there is no cluster to build, so every qualifying pass is its own result (its own
- * AOS-to-LOS is the window), ranked by maximum elevation, highest first, with the earlier AOS breaking ties. The maximum
- * span does not apply. All other rules (selection by peak, sunlight, eligibility, availability fit) are unchanged.
+ * AOS-to-LOS is the window), ordered by the user-selected sort (Date, soonest first, by default; Elevation, highest first, with
+ * the earlier AOS breaking ties; see SORTING). The maximum span does not apply. All other rules (selection by peak, sunlight, eligibility, availability fit) are unchanged.
  *
  * SORTING (user-selected; the default is Date). The sort never changes which results exist, only their order, and it is
  * applied to the COMPLETE candidate list BEFORE the display limit, so the limit always keeps the true first N:
@@ -26,11 +26,14 @@
  *   Elevation:  highest first. A pass's elevation is the maximum reached while operation is permitted. A cluster is
  *               scored by the LOWEST of those among its counted passes ("consistently high"). Ties: earlier start.
  *   Pass count: most counted passes first (clusters only). Ties: earlier start.
- * Candidate generation keeps, for every window (an anchor AOS to a possible end), the Pareto frontier of
- * (number of passes, lowest elevation): the biggest set, and also each smaller set whose lowest elevation is strictly
- * higher. Without that, a count-first selection could hide the best Elevation result (a pair of 80 and 75 degree passes
- * would be hidden behind a three-pass set that includes a 45 degree pass). Exact duplicates are removed; distinct
- * counted sets are all kept.
+ * Candidate generation: every cluster is built around its EARLIEST pass (the anchor, always counted), for each possible end
+ * time, and keeps the frontier over (number of passes, lowest elevation) for that start and end: the biggest set, and each
+ * smaller set whose lowest elevation is strictly higher. Start time is never traded away: an earlier cluster is never dropped
+ * because a later one has at least as many passes and as high an elevation (that pruning once hid the earliest cluster from
+ * Date order), and the best Elevation result is never hidden behind a bigger set (a pair of 80 and 75 degree passes behind a
+ * three-pass set containing a 45 degree pass). The cost is anchors x ends x distinct elevations, not every subset of passes;
+ * tests/sorting-oracle.test.ts compares the first result of every sort with an exhaustive enumeration. Exact duplicates are
+ * removed; distinct counted sets are all kept.
  */
 import { RESULT_LIMIT, SAVED_EDGE_TOLERANCE_SEC, SINGLE_PASS_RESULT_LIMIT } from '../domain/policy.ts';
 import { contains } from '../domain/intervals.ts';
@@ -253,15 +256,21 @@ export function findAllWindows(all: readonly PassAssessment[], availability: rea
     for (const anchor of inBlock) {
       const ends = [...new Set(inBlock.filter((p) => p.riseMs >= anchor.riseMs && p.setMs - anchor.riseMs <= span).map((p) => p.setMs))].sort((x, y) => x - y);
       for (const end of ends) {
-        const candidates = inBlock.filter((p) => p.riseMs >= anchor.riseMs && p.setMs <= end);
-        // The Pareto frontier of (passes, lowest elevation) for this window: walk the elevation threshold downwards and
-        // keep a set only when it has strictly more passes than every set with a higher lowest-elevation.
-        const thresholds = [...new Set(candidates.map(usableElevation))].sort((x, y) => y - x);
-        let keptCount = 0;
-        for (const t of thresholds) {
-          const counted = selectNonOverlapping(candidates.filter((p) => usableElevation(p) >= t));
-          if (counted.length < opts.minOpportunities || counted.length <= keptCount) continue;
-          keptCount = counted.length;
+        // Every cluster built here STARTS WITH the anchor pass, so an earlier start is never lost to a later set. The rest are
+        // passes that begin after the anchor ends (the one-station rule) and finish by \`end\`.
+        const rest = inBlock.filter((p) => p !== anchor && p.riseMs >= anchor.setMs && p.setMs <= end);
+        // Frontier over (passes, lowest elevation) for this start and end: walk an elevation threshold downwards over the
+        // other passes and keep a set unless an already kept one has at least as many passes AND at least as high a lowest
+        // elevation. (Start and end are the same for all of them, so those never need comparing.)
+        const kept: Array<{ count: number; minEl: number }> = [];
+        const thresholds = [...new Set(rest.map(usableElevation))].sort((x, y) => y - x);
+        const candidates = [rest, ...thresholds.map((t) => rest.filter((p) => usableElevation(p) >= t))];
+        for (const pool of candidates) {
+          const counted = [anchor, ...selectNonOverlapping(pool)];
+          if (counted.length < opts.minOpportunities) continue;
+          const minEl = Math.min(...counted.map(usableElevation));
+          if (kept.some((k) => k.count >= counted.length && k.minEl >= minEl)) continue;
+          kept.push({ count: counted.length, minEl });
           const key = counted.map((c) => c.passId).join(',');
           if (!sets.has(key)) sets.set(key, counted);
         }

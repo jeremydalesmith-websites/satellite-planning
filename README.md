@@ -303,11 +303,14 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
     pass identifiers, so the order is total and repeatable.
   The sort is applied to the **complete** list **before** the display limit (25 clusters, 100 single passes), so the
   limit always keeps the true first N of the chosen order, and the page says "Showing the first N of M in this order"
-  when it cuts the list. To make that true for Elevation, candidate generation keeps, for each possible window, every
-  distinct counted set on the frontier of (number of passes, lowest elevation): the biggest set, and each smaller set
-  whose lowest elevation is strictly higher. A count-first search alone would have hidden, for example, the pair of 80° and 75°
-  passes behind a three-pass set that contains a 45° pass. Clusters with exactly the same counted passes appear once;
-  distinct sets are all kept.
+  when it cuts the list. To make that true for every sort, each cluster is built around its **earliest pass** for each
+  possible end time, keeping the frontier of (number of passes, lowest elevation) for that start and end: the biggest set,
+  and each smaller set whose lowest elevation is strictly higher. Start time is never traded away, so an earlier cluster is
+  not dropped because a later one has at least as many passes and as high an elevation (this once hid the earliest cluster
+  from Date order), and a pair of 80° and 75° passes is not hidden behind a three-pass set that contains a 45° pass. The
+  cost grows with passes x ends x distinct elevations, not with every subset of passes. `tests/sorting-oracle.test.ts`
+  compares what each sort puts first with an exhaustive enumeration over 600 random schedules. Clusters with exactly the
+  same counted passes appear once; distinct sets are all kept.
 * **Saved events.** A new event stores the actual cluster interval from its header and is re-checked against
   that fixed interval (`schema: 2`). A pass that drifts so its full pass crosses the saved edge is flagged,
   not followed. A new event also stores the satellites that were selected when it was saved, and re-checks consider only

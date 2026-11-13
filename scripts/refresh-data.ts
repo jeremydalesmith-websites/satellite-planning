@@ -2,7 +2,7 @@
  * Refresh public data into public/data/ so the static app never needs
  * cross-origin access to AMSAT at runtime.
  *
- *   node scripts/refresh-data.ts [--strict]
+ *   node scripts/refresh-data.ts [--strict] [--deadline-min N]
  *
  * Writes:
  *   public/data/elements.json  AMSAT TLEs, filtered to the catalog
@@ -13,6 +13,9 @@
  *   - status is ALL-OR-NOTHING: it is written only if every repeater entry downloaded and parsed. If any request fails,
  *     status.json is NOT written: a file already on disk stays in place with its older download time, and with none the
  *     app treats every repeater as "status unknown".
+ *   - --deadline-min N bounds the WHOLE download phase: once N minutes have passed every request that is running is aborted and
+ *     no new one is tried, so the run ends as an ordinary failure (exit 1, nothing written in strict mode) instead of being
+ *     killed by a surrounding time limit. (Worst case without it: 18 requests x 3 tries x 30 s, far longer than any job limit.)
  *   - --strict (used by the scheduled update): any status failure -> exit 1 and NOTHING is written at all.
  *     Without it (npm start) a status failure only warns, and fresh elements are still written.
  *
@@ -35,6 +38,14 @@ import type { ElementsFile, StatusFile } from '../src/data/ingest.ts';
 const outDir = process.env.SAT_PLANNER_DATA_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'data');
 const RETRY_MS = Number(process.env.SAT_PLANNER_RETRY_MS ?? 1500);
 const SPACING_MS = Number(process.env.SAT_PLANNER_SPACING_MS ?? 1000);
+// Overall deadline for all downloads (--deadline-min N, or SAT_PLANNER_DEADLINE_MS for tests). None by default.
+const deadlineArg = process.argv.indexOf('--deadline-min');
+const DEADLINE_MS = process.env.SAT_PLANNER_DEADLINE_MS
+  ? Number(process.env.SAT_PLANNER_DEADLINE_MS)
+  : deadlineArg >= 0 ? Number(process.argv[deadlineArg + 1]) * 60_000 : 0;
+if (deadlineArg >= 0 && !(DEADLINE_MS > 0)) { console.error('--deadline-min needs a positive number of minutes'); process.exit(2); }
+const deadline = DEADLINE_MS > 0 ? AbortSignal.timeout(DEADLINE_MS) : undefined;
+const pause = (ms: number) => (deadline?.aborted ? Promise.resolve() : new Promise<void>((r) => setTimeout(r, ms)));
 // Generic client name by design. Optionally append a contact, e.g. SAT_PLANNER_CONTACT="+https://example.org".
 const UA = `sat-event-planner/0.1 (static-site data refresh${process.env.SAT_PLANNER_CONTACT ? '; ' + process.env.SAT_PLANNER_CONTACT : ''})`;
 const STATUS_BASE = 'https://status.amsat.org/api/v1';
@@ -45,12 +56,15 @@ async function fetchText(url: string, tries = 3): Promise<string> {
   let last: unknown;
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(30_000) });
+      if (deadline?.aborted) throw new Error('refresh deadline exceeded');
+      const signal = deadline ? AbortSignal.any([AbortSignal.timeout(30_000), deadline]) : AbortSignal.timeout(30_000);
+      const res = await fetch(url, { headers: { 'User-Agent': UA }, signal });
       if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
       return await res.text();
     } catch (e) {
       last = e;
-      await new Promise((r) => setTimeout(r, RETRY_MS * (i + 1)));
+      if (deadline?.aborted) throw new Error('refresh deadline exceeded');
+      await pause(RETRY_MS * (i + 1));
     }
   }
   throw last instanceof Error ? last : new Error(String(last));
@@ -90,7 +104,7 @@ async function downloadStatus(): Promise<StatusAssembly> {
       attempts[a.amsatStatusKey] = { error: e instanceof Error ? e.message : String(e) };
       console.warn(`status ${a.amsatStatusKey}: FAILED (${attempts[a.amsatStatusKey]!.error})`);
     }
-    await new Promise((r) => setTimeout(r, SPACING_MS)); // be polite to a volunteer-run API
+    await pause(SPACING_MS); // be polite to a volunteer-run API
   }
   return assembleStatusFile(attempts, ACTIVITIES.map((a) => a.amsatStatusKey), new Date());
 }

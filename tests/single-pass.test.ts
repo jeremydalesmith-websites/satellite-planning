@@ -8,8 +8,8 @@ import { AO91, SO50, T0, assessed, at, geom, iv } from './factory.ts';
 import { elementsFixture } from './helpers.ts';
 
 /**
- * SINGLE-PASS MODE (minimum passes = 1): every qualifying pass is its own result, ranked by maximum elevation (highest
- * first, earlier on a tie). The maximum span does not apply. Everything else (peak selection, sunlight, eligibility,
+ * SINGLE-PASS MODE (minimum passes = 1): every qualifying pass is its own result, ordered by the chosen sort (these tests ask
+ * for Elevation: highest first, earlier on a tie). The maximum span does not apply. Everything else (peak selection, sunlight, eligibility,
  * availability, selection) is unchanged, and 2+ minimum passes still builds clusters.
  */
 const P = (rise: number, set: number, el = 60, norad = SO50, st: Parameters<typeof assessed>[1] = 'recently-reported-active', thr = 40) =>

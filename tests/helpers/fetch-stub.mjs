@@ -9,6 +9,8 @@
  *   status-unreadable  one repeater answers rows that cannot be read
  *   status-future      succeeds, but one report is dated in the future (the validator must refuse it)
  *   elements-fail      the orbital download fails
+ *   status-hang        status requests never answer (they only end when their abort signal fires)
+ *   elements-hang      the orbital request never answers
  */
 import { readFileSync } from 'node:fs';
 import { tleChecksum } from '../../src/data/ingest.ts';
@@ -31,8 +33,18 @@ function tleText() {
 
 const respond = (body, status = 200) => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
 
-globalThis.fetch = async (input) => {
+/** A request that never answers; it ends only when the caller aborts it, like a stalled connection. */
+const hang = (signal) => new Promise((_, reject) => {
+  if (signal?.aborted) return reject(signal.reason);
+  // A real stalled connection keeps the process alive; AbortSignal timers do not, so hold the event loop open until aborted.
+  const keepAlive = setInterval(() => {}, 1000);
+  signal?.addEventListener('abort', () => { clearInterval(keepAlive); reject(signal.reason); });
+});
+
+globalThis.fetch = async (input, init) => {
   const url = String(input);
+  if (mode === 'elements-hang' && url.includes('nasabare')) return hang(init?.signal);
+  if (mode === 'status-hang' && url.includes('reports.php')) return hang(init?.signal);
   if (url.includes('nasabare')) return mode === 'elements-fail' ? respond('down', 503) : respond(tleText());
   if (url.includes('reports.php')) {
     const key = new URL(url).searchParams.get('name');
