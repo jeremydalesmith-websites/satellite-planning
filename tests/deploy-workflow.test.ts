@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -166,6 +166,7 @@ describe('the build guard really stops publication', () => {
     const shim = join(work, 'bin');
     mkdirSync(shim, { recursive: true });
     writeFileSync(join(shim, 'node'), '#!/bin/sh\nexit 0\n'); // the final validation step is exercised elsewhere
+    chmodSync(join(shim, 'node'), 0o755); // Linux skips a non-executable file on PATH and would run the real node instead
     return spawnSync(bash!, ['-e', '-c', script], { cwd, encoding: 'utf8', env: { ...process.env, PATH: shim + delimiter + (process.env.PATH ?? '') } });
   };
   const script = (() => {
