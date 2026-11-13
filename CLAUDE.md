@@ -114,7 +114,7 @@ Independent prediction validation: see `docs/VALIDATION.md` (needs Python).
 * The results line "Keplers updated ... · Activity reports updated ..." is retrieval time (successful download), not an
   element epoch or a report time, and never implies a live check. A failed download must never advance a timestamp.
 
-## Calendar export (builder only so far: `src/export/ics.ts`)
+## Calendar export (`src/export/ics.ts` builds the entry text and times; `src/export/googleCalendar.ts` makes the "Add to Google Calendar" link shown on saved-event cards)
 * The export is the SAVED plan exactly as saved (a static snapshot). It never recomputes or "fills in" details from current
   predictions; details an older saved event did not store are covered by one concise note. It never says or implies that a
   calendar entry updates automatically: the description ends with "Static calendar copy—recheck times and status:" and the

@@ -218,36 +218,11 @@ describe('the pinned planner commit contains every approved app change', () => {
   it.skipIf(!known)('is an ancestor of HEAD', () => {
     expect(git('merge-base', '--is-ancestor', sha, 'HEAD').status).toBe(0);
   });
-  // Work that is committed but deliberately NOT deployed yet (awaiting approval) is listed here, so the pin guard stays strict for
-  // everything else. Each entry says why it cannot change what visitors get. Remove an entry when its feature is approved and the
-  // pin is moved past it.
-  const UNDEPLOYED_ADDITIONS = [
-    'src/export/ics.ts', // calendar builder: not imported by any app code, so it is not in the published build
-    'src/domain/policy.ts', // calendar constants only: checked below to be additions with no removed or changed line
-  ];
+  // No exemptions: every file that visitors can receive (appPaths) must be identical between the pin and HEAD. If this fails, the
+  // pin is behind an app change: move it to a reviewed commit that contains the change.
   it.skipIf(!known)('has the same app source, scripts, data tooling and lockfile as HEAD (if this fails, move the pin to the newer commit)', () => {
     const changed = git('diff', '--name-only', sha, 'HEAD', '--', ...appPaths).stdout.trim().split('\n').filter(Boolean);
-    expect(changed.filter((f) => !UNDEPLOYED_ADDITIONS.includes(f))).toEqual([]);
-  });
-  it.skipIf(!known)('the listed undeployed changes are only additions (nothing existing was altered), and nothing app-side imports the calendar builder', () => {
-    for (const f of UNDEPLOYED_ADDITIONS) {
-      const stat = git('diff', '--numstat', sha, 'HEAD', '--', f).stdout.trim();
-      if (stat === '') continue; // unchanged since the pin
-      const [added, removed] = stat.split(/\s+/);
-      expect(Number(added), `${f} added lines`).toBeGreaterThanOrEqual(0);
-      expect(removed, `${f} must have no removed lines`).toBe('0');
-    }
-    const importers = git('grep', '-l', "export/ics", 'HEAD', '--', 'src').stdout.trim();
-    expect(importers).toBe('');
-  });
-  it.skipIf(!known)('policy.ts may gain only comments and CALENDAR_* / PLANNER_URL constants (no other new code, so nothing else can run or change)', () => {
-    const added = git('diff', '-U0', sha, 'HEAD', '--', 'src/domain/policy.ts').stdout.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'));
-    const allowed = /^\+(\s*$|\s*\/\*\*?|\s*\*|\s*\/\/|export const (CALENDAR_[A-Z_]+|PLANNER_URL)\b)/;
-    expect(added.filter((l) => !allowed.test(l))).toEqual([]);
-  });
-  it.skipIf(!known)('src/export/ holds only the unimported builder (no index or re-export file that could pull it into the app)', () => {
-    const files = git('ls-tree', '-r', '--name-only', 'HEAD', '--', 'src/export').stdout.trim().split('\n').filter(Boolean);
-    expect(files).toEqual(['src/export/ics.ts']);
+    expect(changed).toEqual([]);
   });
   it.skipIf(!known)('already contains each behavior the automation needs', () => {
     for (const [file, text] of [
