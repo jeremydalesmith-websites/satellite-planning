@@ -17,21 +17,24 @@ Every 24 hours (09:17 UTC) and whenever the owner presses **Run workflow** in th
 
 1. Stops at once, with a clear message, if the push token secret is missing or if GitHub Pages is no longer published from
    the `main` branch (checked through the Pages settings API), before anything is changed.
-2. Checks out the website (`main`) and the **approved planner version** (see below).
+2. Checks out the **approved planner version** (see below), without leaving any credential in its Git configuration.
 3. `npm ci`, then `npm run refresh-data:strict`: downloads fresh Keplers (AMSAT `nasabare.txt`, one request) and
    activity reports (17 spaced requests) with the planner's existing refresh code. Strict means **all or nothing**: if
-   any request fails or returns a malformed response, nothing is written and the run stops.
+   any request fails or returns a malformed response, nothing is written and the run stops. The whole download phase is
+   limited to 6 minutes (see "Time limits").
 4. `npm run validate-data`: both files well formed; downloaded within the last 3 hours; every catalog satellite has
    orbital data; every repeater has a status entry with no recorded failure; no report dated in the future.
 5. `npm test` (no network), then `npm run build:satellites` (type-check, then a build with base `/satellites/`), then
    checks of the built output, including a second validation of the exact files that will be published.
-6. Replaces **only** `satellites/` in the website checkout (`rsync --delete` from `dist/`), then refuses to continue if
-   Git sees any changed path outside `satellites/` (so `hunt/`, `CNAME`, `index.html` and every other page are safe).
-7. Commits as `github-actions[bot]` and pushes to `main` **using the push token**, never forced: it rebases over any
+6. **Only now** checks out the website (`main`), again without persisting credentials, and replaces **only**
+   `satellites/` (`rsync --delete` from `dist/`). It refuses to continue if Git sees any changed path outside
+   `satellites/` (so `hunt/`, `CNAME`, `index.html` and every other page are safe).
+7. Commits as `github-actions[bot]` and pushes to `main` using the push token, never forced: it rebases over any
    newer website commit made meanwhile, so newer work is never overwritten.
 8. **Asks GitHub Pages to build** (explicit API request, see below), then polls (up to 15 minutes) until the **public**
    site serves the new data download time, stopping early if the build of that commit reports an error.
-9. On any failure, opens (or comments on) one issue titled "Satellite data update failed" with a link to the run.
+9. On failure, opens (or comments on) one issue titled "Satellite data update failed" with a link to the run (best
+   effort; see "Time limits").
 
 Because the push is the **last** step before the live check and every earlier step must succeed, a failed download,
 validation, test or build leaves the current publication exactly as it was. This is tested with the real scripts (see
@@ -91,7 +94,7 @@ feature branch, and they must not silently build a stale or unapproved branch. S
 * The workflow lives in the **website** repo's `main`, which is what a schedule runs.
 * It does **not** build "whatever the planner's default branch is". The planner's `main` still holds only the initial
   commit, and the approved code is on `feature/strict-eligibility`, unmerged. The workflow instead checks out **one
-  pinned commit**, `PLANNER_SHA` at the top of the file, currently `b31c2540bab6c861872acc67f5cdd07f9e915a22`, the commit
+  pinned commit**, `PLANNER_SHA` at the top of the file, currently `aff62d0ba20c1ab26d12a1b6a9e051bcd1a26a56`, the commit
   containing everything described here (it must be pushed to the planner repository first so the pin exists remotely).
 * Nothing is merged for this. To publish a newer planner version later, change `PLANNER_SHA` in a reviewed one-line commit
   to the website repo. A planner change is always a deliberate act, never a side effect of the daily schedule. (Merging
@@ -101,6 +104,19 @@ feature branch, and they must not silently build a stale or unapproved branch. S
 
 * **Secret: `SITE_PUSH_TOKEN`** (website repo → Settings → Secrets and variables → Actions), a fine-grained token with
   Contents and Pages read/write on that one repository (above). Nothing else. No credentials appear in browser code.
+* **Where the token goes.** It can publish to the website, so it is kept away from everything that runs project or
+  third-party code. It is **not** given to either checkout (both use `persist-credentials: false`, so nothing is written to
+  a Git configuration), and it is **not** in the environment while dependencies are installed or tests and builds run: the
+  website is not even checked out until after the build. It is supplied, as that step's own environment variable, to three
+  steps only: the 2-minute preflight (`gh api` reads the Pages settings), the push, and the Pages build request. The push
+  hands it to Git for each command with `git -c http.https://github.com/.extraheader=...`, which is not stored in
+  `.git/config`, and the encoded form is registered as a masked value; no step echoes it or turns on command tracing. A
+  secret is also masked by GitHub in logs, but masking is a backstop, not the protection. (The token's arguments are visible
+  to other processes on the single-use runner while Git runs; nothing else runs then.) Tests check each of these properties
+  in the workflow file.
+* **Issues must be enabled** on the website repository for the failure issue to open. They are: a public check of
+  `jeremydalesmith-websites/k1kfx.com` reports `has_issues: true`. If Issues were ever turned off (Settings → General →
+  Features → Issues), the report step would fail and the run's failed status would be the only signal.
 * **No overlapping runs:** a `concurrency` group queues a second run instead of racing the first (never cancelling one in
   progress). **No loops:** the workflow has no `push` trigger; do not add a workflow to the website repo that triggers on
   pushes to `satellites/` without excluding this one. **No overwrite:** pushes are never forced.
@@ -113,6 +129,18 @@ feature branch, and they must not silently build a stale or unapproved branch. S
 * **Third-party actions:** `actions/checkout@v4` and `actions/setup-node@v4` (GitHub's own), by version tag. Pinning them
   to commit SHAs is a possible hardening.
 
+## Time limits and failure reporting
+
+* The refresh command stops itself after **6 minutes** (`--deadline-min 6`): running requests are aborted, no new one is
+  started, and it exits with an ordinary failure, writing nothing. Without it the worst case would be 18 requests x 3 tries x
+  30 seconds, longer than any job limit. A test runs the real script against requests that never answer.
+* Its step has a hard limit of **8 minutes**; every other step has its own limit as well, and the **job limit (75 minutes)
+  is above their sum (69)**. So a stalled step fails as a step, and the later "report failure" step (`if: failure()`) still
+  gets to run.
+* **That is best effort, not a guarantee.** If GitHub cancels the run, the runner is lost, or the job itself reaches its
+  limit, no later step can run: no issue is opened. The failed run in the Actions tab and GitHub's own failure e-mail to the
+  account that last edited the workflow are then the only signals. The workflow file says so.
+
 ## Failure behaviour, tested
 
 `tests/refresh-failure-paths.test.ts` runs the **real** `refresh-data.ts` and `validate-data.ts` as child processes against
@@ -120,12 +148,17 @@ a stubbed network, in the workflow's order (refresh strict, validate, publish), 
 exited 0, as GitHub Actions stops a job at its first failed step. A folder stands in for the published
 `satellites/data/` files. For each of these failures the published `elements.json` and `status.json` are **byte-for-byte
 unchanged**, and the scratch copies too when the refresh itself fails: a status request failing with HTTP 503, a status
-response with no `data` list, a status response whose rows cannot be read, the orbital download failing, and validation
-refusing the data (a report dated in the future). Further tests show a successful run replaces both files with times from
-that run, that the non-strict local run never advances the status time after a failed status download, and that
-"no reports" (one repeater, or all) is published and leaves those repeaters ineligible. This covers the data files; the
-workflow file itself cannot be run locally (it needs GitHub's runners and the real repositories), so its YAML and shell
-steps are reviewed, not executed.
+response with no `data` list, a status response whose rows cannot be read, the orbital download failing, a stalled
+download (hitting the deadline), and validation refusing the data (a report dated in the future). Further tests show a
+successful run replaces both files with times from that run, that the non-strict local run never advances the status time
+after a failed status download, and that "no reports" (one repeater, or all) is published and leaves those repeaters
+ineligible.
+
+`tests/deploy-workflow.test.ts` checks the workflow file's triggers, concurrency, permissions, token placement, time limits,
+publication order and pin, and **executes the build guard** (the step that refuses to publish a build that mentions the
+fox-hunting app, has the wrong base path, or lacks a file) in bash against scratch builds, including a case showing that the
+earlier negated `! grep` form let a mention through. The rest of the workflow cannot be run locally (it needs GitHub's
+runners and the real repositories), so its other YAML and shell steps are reviewed and structurally tested, not executed.
 
 ## Limitations (stated plainly)
 

@@ -6,20 +6,32 @@
 # What it does, once a day and on demand ("Run workflow"):
 #   1. downloads fresh Keplers and activity reports with the planner's own refresh script (strict: all or nothing)
 #   2. validates the downloaded files, runs the planner's tests and builds the planner for /satellites/
-#   3. replaces ONLY the website's satellites/ folder with that build and pushes one commit to main
-#   4. waits until the live site really serves the new data, and opens/updates an issue if anything failed
+#   3. ONLY THEN checks out the website, replaces ONLY its satellites/ folder with that build and pushes one commit to main
+#   4. asks GitHub Pages to build, waits until the public site serves the new data, and opens/updates an issue on failure
 # Nothing is pushed unless every earlier step succeeded, so a failure leaves the current publication untouched.
+#
+# THE TOKEN. SITE_PUSH_TOKEN can publish to the website, so it is kept away from everything that runs project or third-party
+# code: it is NOT given to any checkout (both use persist-credentials: false, so no credential is written into a Git config),
+# and it is never in the environment while dependencies are installed or tests and builds run. It is passed, as that step's own
+# environment variable, only to the three steps that need it: the preflight check, the push, and the Pages build request. The
+# push supplies it to Git through a one-command option (nothing is stored in .git/config), and the encoded form is masked.
 #
 # HOW THE SITE IS PUBLISHED (explicit, not "push and hope"). The site is published from the main branch ("deploy from a
 # branch"). GitHub documents that "Commits pushed by a GitHub Actions workflow that uses the GITHUB_TOKEN do not trigger a
 # GitHub Pages build", so this workflow does not depend on the push to publish. After pushing it ASKS GitHub Pages to build, with
 # the documented "Request a GitHub Pages build" API (POST /repos/{owner}/{repo}/pages/builds), then waits for that build and for the
-# new data to appear on the public site. Everything that touches the website repo uses one fine-grained personal access token
-# (secret SITE_PUSH_TOKEN) limited to this repository, with Contents: read and write (push) and Pages: read and write (request and
-# read builds). GitHub's documentation does not say that the built-in GITHUB_TOKEN may call the build-request endpoint, so it is
-# not used for it; the built-in token keeps only read access to contents and the right to open the failure issue.
+# new data to appear on the public site. The token is a fine-grained personal access token limited to the website repository,
+# with Contents: read and write (push) and Pages: read and write (request and read builds). GitHub's documentation does not say
+# that the built-in GITHUB_TOKEN may call the build-request endpoint, so it is not used for it; the built-in token keeps only read
+# access to contents and the right to open the failure issue.
 # Limits of the API (documented): one concurrent build per repository and per requester, extra requests are queued; it builds the
 # latest revision of the default branch.
+#
+# TIME LIMITS. The download phase is bounded twice: the refresh command stops itself after 6 minutes (it aborts running
+# requests and ends as an ordinary failure), and its step has a hard limit of 8 minutes. Every step has its own limit and the job
+# limit is above their sum, so a stalled step fails as a step and the failure-issue step still runs. That is a best effort, not
+# a guarantee: if GitHub cancels the run or the runner is lost, or the whole job hits its limit, no step can run afterwards, no
+# issue is opened, and the failed run in the Actions tab (and GitHub's own failure e-mail) is the only signal.
 
 name: Update satellites
 
@@ -41,18 +53,19 @@ env:
   # owner approved and never whatever happens to be on a branch. To publish a newer planner version: change this SHA
   # (a reviewed one-line commit to this file). See deploy/README.md.
   PLANNER_REPO: jeremydalesmith-websites/satellite-planning
-  PLANNER_SHA: b31c2540bab6c861872acc67f5cdd07f9e915a22
+  PLANNER_SHA: aff62d0ba20c1ab26d12a1b6a9e051bcd1a26a56
   SITE_URL: https://k1kfx.com/satellites/
 
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 75 # above the sum of the step limits below (69 in the worst case)
     permissions:
-      contents: read # the built-in token cannot push; the push uses SITE_PUSH_TOKEN
+      contents: read # the built-in token cannot push; publishing uses SITE_PUSH_TOKEN
       issues: write # report a failure
     steps:
       - name: Check the token and that the site is still published from the main branch
+        timeout-minutes: 2
         env:
           GH_TOKEN: ${{ secrets.SITE_PUSH_TOKEN }}
         run: |
@@ -64,46 +77,46 @@ jobs:
           echo "$pages" | jq -e '.build_type == "legacy" and .source.branch == "main"' >/dev/null \
             || { echo "::error::GitHub Pages is not published from the main branch any more, so this workflow's publication step no longer applies. Stopping before changing anything."; exit 1; }
 
-      - name: Check out the website (main)
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          path: site
-          token: ${{ secrets.SITE_PUSH_TOKEN }} # used again by "git push" below
-
       - name: Check out the approved planner version
+        timeout-minutes: 3
         uses: actions/checkout@v4
         with:
           repository: ${{ env.PLANNER_REPO }}
           ref: ${{ env.PLANNER_SHA }}
           path: planner
-          persist-credentials: false # the planner checkout never gets a push credential
+          persist-credentials: false # no credential is written into the planner checkout's Git configuration
 
       - uses: actions/setup-node@v4
+        timeout-minutes: 5
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: planner/package-lock.json
 
       - name: Install the planner's locked dependencies
+        timeout-minutes: 8
         working-directory: planner
         run: npm ci
 
       - name: Download fresh data (strict: any failure stops the run and writes nothing)
+        timeout-minutes: 8 # the command itself gives up after 6 minutes (--deadline-min 6 in package.json), so this is a backstop
         working-directory: planner
         run: npm run refresh-data:strict
 
       - name: Validate the data (structure, freshness, completeness)
+        timeout-minutes: 2
         working-directory: planner
         run: npm run validate-data
 
       - name: Test and build the planner for /satellites/
+        timeout-minutes: 8
         working-directory: planner
         run: |
           npm test
           npm run build:satellites # type-checks, then builds with base /satellites/
 
       - name: Check the build before publishing
+        timeout-minutes: 2
         working-directory: planner
         run: |
           test -f dist/index.html
@@ -111,10 +124,22 @@ jobs:
           test -f dist/data/elements.json
           test -f dist/data/status.json
           grep -q '/satellites/assets/' dist/index.html
-          ! grep -rqi 'hunt' dist/index.html # the fox-hunting app is never referenced
+          if grep -qi 'hunt' dist/index.html; then
+            echo "::error::dist/index.html mentions 'hunt': the fox-hunting app must never be referenced. Not publishing."
+            exit 1
+          fi
           node scripts/validate-data.ts dist/data # the files that will be published are the validated ones
 
+      - name: Check out the website (main)
+        timeout-minutes: 3
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: site
+          persist-credentials: false # nothing is stored in the website checkout's Git configuration; the push step supplies the token itself
+
       - name: Replace ONLY the satellites/ folder
+        timeout-minutes: 3
         working-directory: site
         run: |
           mkdir -p satellites
@@ -125,18 +150,25 @@ jobs:
           if [ -n "$outside" ]; then echo "::error::Refusing to publish: files outside satellites/ changed: $outside"; exit 1; fi
           if git diff --cached --quiet; then echo "No change to publish."; echo "nochange=true" >> "$GITHUB_ENV"; fi
 
-      - name: Commit and push to main
+      - name: Commit and push to main (the token is used for this step only)
         if: env.nochange != 'true'
+        timeout-minutes: 5
         working-directory: site
+        env:
+          SITE_PUSH_TOKEN: ${{ secrets.SITE_PUSH_TOKEN }}
         run: |
+          # Hand the token to Git for each command only (-c is not written to .git/config); mask the encoded form too.
+          basic=$(printf 'x-access-token:%s' "$SITE_PUSH_TOKEN" | base64 -w0)
+          echo "::add-mask::$basic"
+          gitauth() { git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $basic" "$@"; }
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Update satellite planner data (automated, planner ${PLANNER_SHA::7})"
           pushed=false
           for i in 1 2 3; do
             # Rebase over any unrelated website commit made while this ran; only satellites/ is ours, so it is clean.
-            git pull --rebase origin main
-            if git push origin HEAD:main; then pushed=true; break; fi
+            gitauth pull --rebase origin main
+            if gitauth push origin HEAD:main; then pushed=true; break; fi
             sleep $((i * 10))
           done
           $pushed
@@ -146,6 +178,7 @@ jobs:
 
       - name: Ask GitHub Pages to build, then confirm the public site serves the new data
         if: env.nochange != 'true'
+        timeout-minutes: 17
         env:
           GH_TOKEN: ${{ secrets.SITE_PUSH_TOKEN }}
         run: |
@@ -172,8 +205,9 @@ jobs:
           echo "::error::The data was pushed to main but $url did not serve it within 15 minutes. Latest Pages build: $(gh api "repos/$repo/pages/builds/latest" --jq '.commit + " " + .status' 2>/dev/null || echo unknown). Re-run this workflow to retry."
           exit 1
 
-      - name: Tell the owner if anything failed
+      - name: Tell the owner if anything failed (best effort)
         if: failure()
+        timeout-minutes: 3
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
