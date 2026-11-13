@@ -61,7 +61,7 @@ export async function loadData(): Promise<LoadResult> {
   let elements: ElementsFile;
   try {
     const raw = await getJson('data/elements.json');
-    if (!isElementsFile(raw)) throw new Error('data/elements.json has an unexpected format');
+    if (!isElementsFile(raw)) throw new Error('data/elements.json has an unexpected format; if the planner was just updated, reload the page');
     elements = raw;
   } catch (e) {
     return {
@@ -74,7 +74,7 @@ export async function loadData(): Promise<LoadResult> {
   try {
     const raw = await getJson('data/status.json');
     const problem = statusFileProblem(raw);
-    if (problem) throw new Error(`the file is malformed: ${problem}`);
+    if (problem) throw new Error(`the file is malformed: ${problem}${problem === 'unexpected format' ? '; if the planner was just updated, reload the page' : ''}`);
     status = raw as StatusFile; // validated just above
   } catch (e) {
     statusProblem = `Operating-status data is unavailable (${e instanceof Error ? e.message : String(e)}). No satellite can be confirmed eligible without it, so none will be planned.`;

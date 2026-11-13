@@ -25,12 +25,16 @@ import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ACTIVITIES, SATELLITES, SOURCES } from '../src/catalog/catalog.ts';
-import { assembleStatusFile, planWrites } from '../src/data/refresh.ts';
+import { assembleStatusFile, planWrites, statusAttemptFromBody } from '../src/data/refresh.ts';
 import type { StatusAssembly, StatusAttempt } from '../src/data/refresh.ts';
-import { parseStatusReports, parseTleText, selectElements } from '../src/data/ingest.ts';
+import { parseTleText, selectElements } from '../src/data/ingest.ts';
 import type { ElementsFile, StatusFile } from '../src/data/ingest.ts';
 
-const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'data');
+// SAT_PLANNER_* variables exist for the automated tests of the failure paths (a scratch directory and no waiting);
+// leave them unset in normal use.
+const outDir = process.env.SAT_PLANNER_DATA_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'data');
+const RETRY_MS = Number(process.env.SAT_PLANNER_RETRY_MS ?? 1500);
+const SPACING_MS = Number(process.env.SAT_PLANNER_SPACING_MS ?? 1000);
 // Generic client name by design. Optionally append a contact, e.g. SAT_PLANNER_CONTACT="+https://example.org".
 const UA = `sat-event-planner/0.1 (static-site data refresh${process.env.SAT_PLANNER_CONTACT ? '; ' + process.env.SAT_PLANNER_CONTACT : ''})`;
 const STATUS_BASE = 'https://status.amsat.org/api/v1';
@@ -46,7 +50,7 @@ async function fetchText(url: string, tries = 3): Promise<string> {
       return await res.text();
     } catch (e) {
       last = e;
-      await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+      await new Promise((r) => setTimeout(r, RETRY_MS * (i + 1)));
     }
   }
   throw last instanceof Error ? last : new Error(String(last));
@@ -76,15 +80,17 @@ async function downloadStatus(): Promise<StatusAssembly> {
     const url = `${STATUS_BASE}/reports.php?name=${encodeURIComponent(a.amsatStatusKey)}&hours=${STATUS_HOURS}&limit=${STATUS_LIMIT}`;
     try {
       const body = JSON.parse(await fetchText(url));
-      const { reports, problems } = parseStatusReports(body, { name: a.amsatStatusKey, noradId: a.noradId });
-      if (problems.length) console.warn(`status ${a.amsatStatusKey}: ${problems.length} problem(s), e.g. ${problems[0]}`);
-      attempts[a.amsatStatusKey] = { reports };
+      const { notes, ...attempt } = statusAttemptFromBody(body, { name: a.amsatStatusKey, noradId: a.noradId });
+      if (notes.length) console.warn(`status ${a.amsatStatusKey}: ${notes.length} note(s), e.g. ${notes[0]}`);
+      if (attempt.reports?.length === 0) console.log(`status ${a.amsatStatusKey}: no reports (valid response; stays ineligible)`);
+      attempts[a.amsatStatusKey] = attempt;
+      if (attempt.error) console.warn(`status ${a.amsatStatusKey}: FAILED (${attempt.error})`);
     } catch (e) {
       // An unknown name returns 404 satellite_not_found; record it rather than guessing.
       attempts[a.amsatStatusKey] = { error: e instanceof Error ? e.message : String(e) };
       console.warn(`status ${a.amsatStatusKey}: FAILED (${attempts[a.amsatStatusKey]!.error})`);
     }
-    await new Promise((r) => setTimeout(r, 1000)); // be polite to a volunteer-run API
+    await new Promise((r) => setTimeout(r, SPACING_MS)); // be polite to a volunteer-run API
   }
   return assembleStatusFile(attempts, ACTIVITIES.map((a) => a.amsatStatusKey), new Date());
 }

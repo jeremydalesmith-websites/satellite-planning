@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_SELECTED_NORAD_IDS, consideredIds, evaluateEligibility } from '../eligibility/eligibility.ts';
 import { loadData } from '../data/load.ts';
 import type { LoadResult } from '../data/load.ts';
-import { predictInWorker } from '../orbit/client.ts';
+import { WorkerStartError, predictInWorker } from '../orbit/client.ts';
+import { RELOAD_MESSAGE, WORKER_FAILED_MESSAGE, newerVersionPublished } from '../data/version.ts';
 import type { PredictHandle } from '../orbit/client.ts';
 import { computePlan, predictionThresholds, usableElements } from '../planner.ts';
 import type { PlanInputs, PlanResult } from '../planner.ts';
@@ -80,6 +81,10 @@ export function App() {
         setTimeout(() => document.getElementById('results-title')?.focus(), 50);
         return;
       }
+      if (await newerVersionPublished()) {
+        setSearch({ state: 'error', message: RELOAD_MESSAGE });
+        return;
+      }
       setSearch({ state: 'running', done: 0, total: toPredict.length, name: '' });
       const h = predictInWorker(
         {
@@ -98,7 +103,7 @@ export function App() {
         setSearch({ state: 'done', inputs, result, nowMs: now });
         setTimeout(() => document.getElementById('results-title')?.focus(), 50);
       } catch (e) {
-        setSearch({ state: 'error', message: `The calculation failed: ${e instanceof Error ? e.message : String(e)}` });
+        setSearch({ state: 'error', message: e instanceof WorkerStartError ? WORKER_FAILED_MESSAGE : `The calculation failed: ${e instanceof Error ? e.message : String(e)}` });
       }
     },
     [data],

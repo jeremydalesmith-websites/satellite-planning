@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ACTIVITIES } from '../src/catalog/catalog.ts';
-import { assembleStatusFile, planWrites } from '../src/data/refresh.ts';
+import { assembleStatusFile, planWrites, statusAttemptFromBody } from '../src/data/refresh.ts';
 import type { StatusAttempt } from '../src/data/refresh.ts';
 import { validateDataFiles } from '../src/data/validate.ts';
 import { FIXTURE_DOWNLOAD_MS, elementsFixture, statusFixture } from './helpers.ts';
@@ -82,7 +82,7 @@ describe('pre-publication validation', () => {
     e.sets = e.sets.slice(1);
     expect(validateDataFiles(e, statusFixture, o).problems.join()).toMatch(/no orbital data for/);
   });
-  it('rejects a status file with a missing entry, a recorded error, or no reports at all', () => {
+  it('rejects a status file with a missing entry or a recorded error; no reports at all is only a warning', () => {
     const missing = clone(statusFixture);
     delete missing.satellites[keys[0]!];
     expect(validateDataFiles(elementsFixture, missing, o).problems.join()).toMatch(/no entry for/);
@@ -91,7 +91,9 @@ describe('pre-publication validation', () => {
     expect(validateDataFiles(elementsFixture, errored, o).problems.join()).toMatch(/records a failed download/);
     const empty = clone(statusFixture);
     for (const k of Object.keys(empty.satellites)) empty.satellites[k]!.reports = [];
-    expect(validateDataFiles(elementsFixture, empty, o).problems.join()).toMatch(/no reports at all/);
+    const r = validateDataFiles(elementsFixture, empty, o);
+    expect(r.problems).toEqual([]); // a well-formed "no reports" answer is valid data
+    expect(r.warnings.join()).toMatch(/no reports at all/);
   });
   it('rejects a report dated in the future', () => {
     const f = clone(statusFixture);
@@ -104,5 +106,28 @@ describe('pre-publication validation', () => {
     const r = validateDataFiles(e, statusFixture, o);
     expect(r.problems).toEqual([]);
     expect(r.warnings.join()).toMatch(/days old/);
+  });
+});
+
+describe('one status response: empty is success, malformed is failure', () => {
+  const exp = { name: 'SO-50_[FM]', noradId: 27607 };
+  const row = (over: Record<string, unknown> = {}) => ({ name: 'SO-50_[FM]', norad_cat_id: 27607, report: 'Heard', observation_time: '2026-11-12T10:00:00Z', callsign: 'X', ...over });
+  it('{"data": []} succeeds with no reports', () => {
+    expect(statusAttemptFromBody({ data: [] }, exp)).toMatchObject({ reports: [] });
+    expect(statusAttemptFromBody({ data: [] }, exp).error).toBeUndefined();
+  });
+  it('a body without a data array is malformed (including null and an error object)', () => {
+    for (const body of [null, {}, { error: 'x' }, { data: 'oops' }, 'text']) expect(statusAttemptFromBody(body, exp).error).toMatch(/malformed/);
+  });
+  it('rows that cannot be read at all are malformed; one bad row among good ones is only a note', () => {
+    expect(statusAttemptFromBody({ data: [row({ report: 'Maybe' })] }, exp).error).toMatch(/malformed/);
+    const mixed = statusAttemptFromBody({ data: [row({ report: 'Maybe' }), row()] }, exp);
+    expect(mixed.error).toBeUndefined();
+    expect(mixed.reports).toHaveLength(1);
+  });
+  it('rows for another mode are rejected on purpose and read as "no reports", not as a malformed response', () => {
+    const r = statusAttemptFromBody({ data: [row({ name: 'SO-50_[SSTV]' })] }, exp);
+    expect(r.error).toBeUndefined();
+    expect(r.reports).toEqual([]);
   });
 });

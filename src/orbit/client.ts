@@ -7,6 +7,14 @@ export interface PredictHandle {
   cancel: () => void;
 }
 
+/** The calculation worker could not be started (typically: its script no longer exists after an update). */
+export class WorkerStartError extends Error {
+  constructor(detail: string) {
+    super(detail);
+    this.name = 'WorkerStartError';
+  }
+}
+
 let nextId = 1;
 
 /**
@@ -40,7 +48,7 @@ export function predictInWorker(
     };
     worker.onerror = (e) => {
       worker.terminate();
-      reject(new Error(e.message || 'The prediction worker failed to start.'));
+      reject(new WorkerStartError(e.message || 'The prediction worker failed to start.'));
     };
     worker.postMessage({ ...req, id } satisfies PredictRequest);
   });

@@ -6,12 +6,31 @@
  * `downloadedAt`: a timestamp is never advanced by a download that did not fully succeed. (Writing a file with a fresh
  * time and some satellites silently empty would let stale or missing evidence look current.)
  */
-import type { CompactReport, ElementsFile, StatusFile } from './ingest.ts';
+import { parseStatusReports } from './ingest.ts';
+import type { CompactReport, ElementsFile, ExpectedStatusEntry, StatusFile } from './ingest.ts';
 
 export interface StatusAttempt {
   reports?: CompactReport[];
   /** Set when the request or its parsing failed. */
   error?: string;
+}
+
+/**
+ * Turn the body of ONE status response into an attempt. The three outcomes are deliberately different:
+ *   - a well-formed response with NO reports ({"data": []}) is a SUCCESS: that repeater simply has no recent reports, so it
+ *     stays ineligible (no "Heard" report), and it does not by itself stop the other repeaters' data from being updated;
+ *   - a response that is not the expected shape, or whose rows for this entry are all unreadable, is MALFORMED = a failure;
+ *   - (a transport failure, HTTP error or invalid JSON never reaches here: the caller records it as a failure.)
+ * Rows that belong to a different mode or satellite are rejected on purpose (see parseStatusReports) and do not count as
+ * unreadable.
+ */
+export function statusAttemptFromBody(body: unknown, expected: ExpectedStatusEntry): StatusAttempt & { notes: string[] } {
+  const parsed = parseStatusReports(body, expected);
+  if (!parsed.hasDataArray) return { error: 'malformed response: no "data" array', notes: parsed.problems };
+  if (parsed.unreadableRows > 0 && parsed.reports.length === 0) {
+    return { error: `malformed response: ${parsed.unreadableRows} report row(s) could not be read and none could`, notes: parsed.problems };
+  }
+  return { reports: parsed.reports, notes: parsed.problems };
 }
 
 export type StatusAssembly =

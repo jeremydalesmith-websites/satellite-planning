@@ -71,8 +71,8 @@ export function validateDataFiles(elementsRaw: unknown, statusRaw: unknown, o: V
         if (o.nowMs - ms <= STATUS_WINDOW_HOURS * 3_600_000) recent++;
       }
     }
-    // An API that answers "no reports at all" for every satellite is almost certainly broken, not quiet.
-    if (reportCount === 0) problems.push('status.json: contains no reports at all (expected some for a working API)');
+    // A well-formed answer of "no reports" is valid data: those satellites stay ineligible. It is worth a warning, not a block.
+    if (reportCount === 0) warnings.push('status.json: contains no reports at all, so no satellite can qualify');
     else if (recent === 0) warnings.push(`status.json: no report in the last ${STATUS_WINDOW_HOURS} hours, so no satellite can currently qualify`);
   }
   return { problems, warnings };

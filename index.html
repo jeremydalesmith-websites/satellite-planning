@@ -6,6 +6,17 @@
     <link rel="icon" href="data:," />
     <meta name="description" content="Plan family radio-club events around multiple FM amateur-radio satellite passes." />
     <title>Satellite Pass Planner</title>
+    <script>
+      // If the app's own script or stylesheet fails to load (usually a cached copy of this page opened right after an update
+      // removed the old files), say so instead of leaving a blank page.
+      window.addEventListener('error', function (e) {
+        var t = e.target;
+        if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
+          var root = document.getElementById('root');
+          if (root && !root.firstChild) root.textContent = 'The planner could not be loaded. It was probably just updated: reload the page (Ctrl+F5 if it still fails).';
+        }
+      }, true);
+    </script>
   </head>
   <body>
     <div id="root"></div>

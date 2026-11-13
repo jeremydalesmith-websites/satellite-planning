@@ -132,6 +132,12 @@ const CODE_BY_LABEL: Record<string, ReportCode> = {
 export interface StatusParseResult {
   reports: CompactReport[];
   problems: string[];
+  /** Whether the response had the expected `data` array at all. An empty array is a valid answer ("no reports"). */
+  hasDataArray: boolean;
+  /** Rows that belonged to the expected entry but could not be read (unknown report value, no usable time). */
+  unreadableRows: number;
+  /** Rows for a different mode or satellite, rejected on purpose. */
+  otherEntryRows: number;
 }
 
 /** What a status response must be about. Rows for any other mode/satellite are rejected. */
@@ -159,19 +165,23 @@ export function parseStatusReports(body: unknown, expected: ExpectedStatusEntry)
   const reports: CompactReport[] = [];
   const data = (body as { data?: unknown } | null)?.data;
   if (!Array.isArray(data)) {
-    return { reports, problems: ['Response has no "data" array'] };
+    return { reports, problems: ['Response has no "data" array'], hasDataArray: false, unreadableRows: 0, otherEntryRows: 0 };
   }
+  let unreadableRows = 0;
+  let otherEntryRows = 0;
   const callers = new Map<string, number>();
   for (const row of data) {
     const r = row as { observation_time?: unknown; report?: unknown; callsign?: unknown; name?: unknown; norad_cat_id?: unknown };
     const idOk = r.norad_cat_id === null || r.norad_cat_id === undefined || r.norad_cat_id === expected.noradId;
     if (r.name !== expected.name || !idOk) {
+      otherEntryRows++;
       problems.push(`Rejected report for a different entry: ${JSON.stringify(r.name)} (NORAD ${JSON.stringify(r.norad_cat_id)}), expected ${expected.name}`);
       continue;
     }
     const code = typeof r.report === 'string' ? CODE_BY_LABEL[r.report] : undefined;
     const t = typeof r.observation_time === 'string' ? Date.parse(r.observation_time) : NaN;
     if (!code || !Number.isFinite(t)) {
+      unreadableRows++;
       problems.push(`Skipped unreadable report: ${JSON.stringify(row).slice(0, 80)}`);
       continue;
     }
@@ -180,5 +190,5 @@ export function parseStatusReports(body: unknown, expected: ExpectedStatusEntry)
     reports.push([Math.floor(t / 1000), code, callers.get(call)!]);
   }
   reports.sort((a, b) => b[0] - a[0]);
-  return { reports, problems };
+  return { reports, problems, hasDataArray: true, unreadableRows, otherEntryRows };
 }
