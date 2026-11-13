@@ -224,6 +224,8 @@ cross-origin requests to AMSAT, no CORS dependence). A future workflow is intend
 * Status is **all-or-nothing**: it is written only when every repeater entry downloaded and parsed. If any request
   fails, `status.json` is not touched; a previous file stays in place with its own (older) download time, and with
   none every repeater is "unconfirmed". Nothing is guessed, and a timestamp is never advanced by a failed download.
+* A well-formed answer with **no reports** is a success (that repeater stays ineligible and does not block the update);
+  an HTTP error, invalid JSON, a body without the `data` list, or rows that cannot be read are failures.
 * `--strict` (`npm run refresh-data:strict`, for automation): any status failure exits 1 and **nothing** is written.
   `npm run validate-data` then checks structure, freshness (downloaded within 3 hours), the catalog being complete, no
   failed entries and at least some reports, before anything is published.
@@ -233,6 +235,10 @@ minutes; the job sends a descriptive User-Agent and makes one spaced request
 per satellite per run. Report data is © AMSAT, **CC BY 4.0**, and is
 attributed in the app. Callsigns are not stored in the published file
 (reports keep only a time, a value, and an anonymous per-file operator index).
+
+**Updates while a page is open.** Each build writes `version.json` and compiles the same code id into the page. When a search
+starts, the page makes one small request for it; if the published planner has changed it says to reload instead of failing
+(see `deploy/README.md`). The data is read once per page load and never refreshes by itself.
 
 **Limitation, stated plainly:** the frequency/restriction catalog is manual. The
 app labels those notes "manual catalog note, not live" with the source page's
