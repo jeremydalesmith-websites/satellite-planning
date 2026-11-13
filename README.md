@@ -1,4 +1,4 @@
-# FM Satellite Event Planner
+# Satellite Pass Planner
 
 A static web app that answers one question:
 
@@ -14,6 +14,38 @@ Scope of this release: FM voice repeaters, cross-band on 2 m and 70 cm, both V/U
 and U/V. Deliberately **not** implemented (but the data model has room): SSTV,
 linear transponders, packet/APRS/telemetry/beacons, coordination with another
 station.
+
+---
+
+## Quick start (run it on your own computer)
+
+**You need:** [Git](https://git-scm.com/), [Node.js](https://nodejs.org/) **22.18 or newer** (check with `node -v`), a
+current web browser, and an internet connection for the first start. No account, API key or credentials are involved.
+
+The app lives on the `feature/strict-eligibility` branch (`main` only holds an initial commit), so clone that branch:
+
+```bash
+git clone --branch feature/strict-eligibility --single-branch https://github.com/jeremydalesmith-websites/satellite-planning.git
+cd satellite-planning
+npm ci          # installs exactly the locked dependency versions
+npm start       # downloads current satellite data, then starts the app
+```
+
+When it prints `Local: http://localhost:5173/`, open that address in your browser. Enter a latitude and longitude, tick
+the days and times you are free, and press **Find event windows**. Your location and settings stay in your own browser;
+nothing is sent anywhere.
+
+**About the data.** `npm start` downloads the current public data from AMSAT **once, at startup**: the orbital elements
+and the recent repeater status reports. **Leaving the app running does not refresh that data automatically**, and
+neither does pressing Search. To get newer data, stop the app (Ctrl+C) and run `npm start` again (or run
+`npm run refresh-data` in a second terminal and reload the page). The page shows how old the status reports are
+("Status updated 3 hours ago") and warns when they are more than a day old. Because a satellite only counts if its FM
+repeater was reported working in the last 72 hours, stale data quietly means fewer (eventually zero) eligible satellites.
+
+**Windows PowerShell:** if `npm` fails with "running scripts is disabled on this system", either use Command Prompt
+instead, or type `npm.cmd` in place of `npm` (for example `npm.cmd start`). You do not need to change any system setting.
+
+`npm test` runs the automated tests (no network needed). Details on every part of the project follow below.
 
 ---
 
@@ -66,7 +98,7 @@ Use `npm ci` (not `npm install`) so you get exactly the locked dependency versio
 
 ```bash
 npm ci                 # installs exactly the versions in package-lock.json
-npm start              # downloads fresh AMSAT data, then serves http://localhost:5173/
+npm start              # downloads current AMSAT data once, then serves http://localhost:5173/ (no auto-refresh while running)
 ```
 
 `npm start` = `npm run refresh-data` (download and validate AMSAT elements and
