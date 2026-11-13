@@ -15,7 +15,8 @@ now" button, and no polling in the browser. It automates the copy that is now do
 
 Every 24 hours (09:17 UTC) and whenever the owner presses **Run workflow** in the website repo's Actions tab:
 
-1. Stops at once, with a clear message, if the push token secret is missing.
+1. Stops at once, with a clear message, if the push token secret is missing or if GitHub Pages is no longer published from
+   the `main` branch (checked through the Pages settings API), before anything is changed.
 2. Checks out the website (`main`) and the **approved planner version** (see below).
 3. `npm ci`, then `npm run refresh-data:strict`: downloads fresh Keplers (AMSAT `nasabare.txt`, one request) and
    activity reports (17 spaced requests) with the planner's existing refresh code. Strict means **all or nothing**: if
@@ -26,9 +27,10 @@ Every 24 hours (09:17 UTC) and whenever the owner presses **Run workflow** in th
    checks of the built output, including a second validation of the exact files that will be published.
 6. Replaces **only** `satellites/` in the website checkout (`rsync --delete` from `dist/`), then refuses to continue if
    Git sees any changed path outside `satellites/` (so `hunt/`, `CNAME`, `index.html` and every other page are safe).
-7. Commits as `github-actions[bot]` and pushes to `main` **using the push token** (rebasing over any unrelated website
-   commit made meanwhile).
-8. Polls the live site until `…/satellites/data/status.json` shows the new download time (up to 12 minutes).
+7. Commits as `github-actions[bot]` and pushes to `main` **using the push token**, never forced: it rebases over any
+   newer website commit made meanwhile, so newer work is never overwritten.
+8. **Asks GitHub Pages to build** (explicit API request, see below), then polls (up to 15 minutes) until the **public**
+   site serves the new data download time, stopping early if the build of that commit reports an error.
 9. On any failure, opens (or comments on) one issue titled "Satellite data update failed" with a link to the run.
 
 Because the push is the **last** step before the live check and every earlier step must succeed, a failed download,
@@ -47,32 +49,39 @@ be read at all. A permanent failure for one repeater (for example AMSAT renaming
 deliberately because a missing answer cannot be told apart from a wrong key. Download times are the true time of the
 successful download and are never advanced by a failed one.
 
-## How the push publishes the site (checked, not assumed)
+## How the site is published (explicit, checked against GitHub's documentation)
 
 * **Documented by GitHub:** "Commits pushed by a GitHub Actions workflow that uses the `GITHUB_TOKEN` do not trigger a
-  GitHub Pages build" (docs.github.com, *Configuring a publishing source for your GitHub Pages site*). This planner's site
-  is published from the `main` branch, so a bot push using the built-in token would update the files **without
-  publishing**. The earlier draft's assumption that it might is removed.
-* **Proposed mechanism:** the push is made with a **fine-grained personal access token**, stored as the repository secret
-  `SITE_PUSH_TOKEN`, so it is an ordinary push by an authorised user, which is the case GitHub documents as starting the
-  Pages build. This keeps the branch-based setup exactly as it is.
-  * Created by the owner (the token is never shown to anyone else): GitHub → Settings → Developer settings →
-    Fine-grained tokens; resource owner = the account that owns the `k1kfx.com` repository; **only that repository**;
-    repository permissions **Contents: Read and write** (Metadata read is added automatically); nothing else.
-  * It has an expiry (choose up to one year and set a calendar reminder). When it expires the push fails, the run fails
-    visibly, and the issue is opened; creating a new token and updating the secret fixes it.
+  GitHub Pages build" (docs.github.com, *Configuring a publishing source for your GitHub Pages site*). The site is published
+  from the `main` branch, so a bot push alone would update the files **without publishing**. The workflow therefore does not
+  depend on the push to publish, and "push, wait and see" is not the mechanism.
+* **The mechanism:** after the push the workflow calls GitHub's **Request a GitHub Pages build** API,
+  `POST /repos/{owner}/{repo}/pages/builds`, and then reads `GET /repos/{owner}/{repo}/pages/builds/latest` to follow it.
+  That keeps the existing branch-based setup; nothing about the Pages source changes.
+* **Verified from GitHub's documentation** (the REST pages API and the permissions tables):
+  * It builds **the latest revision of the default branch** ("the same effect as pushing a commit"), which is `main`.
+  * Limit: **one concurrent build per repository and one per requester**; a request made while one runs is queued, so a
+    second request (the push may also have started a build) is harmless. Success is `201 Created`.
+  * Permission: the repository permission **Pages** at **write** (requesting) and **read** (the build-status reads). The
+    permissions table lists these endpoints for user access tokens and installation tokens, and the page says classic
+    tokens and OAuth tokens need the `repo` scope.
+  * **Not documented:** whether the built-in `GITHUB_TOKEN` (`pages: write`) may call it. It is therefore **not used** for it.
+* **Authentication:** one **fine-grained personal access token** stored as the secret `SITE_PUSH_TOKEN` and used for the
+  push and for these API calls:
+  * Created by the owner (never shown to anyone else): GitHub → Settings → Developer settings → Fine-grained tokens;
+    resource owner = the account that owns the `k1kfx.com` repository; **only that repository**; permissions
+    **Contents: Read and write** and **Pages: Read and write** (Metadata read is added automatically); nothing else.
+  * It has an expiry (choose up to one year and set a reminder). When it expires, the run fails at its first step or at the
+    push, visibly, and the issue is opened; creating a new token and updating the secret fixes it.
   * The built-in `GITHUB_TOKEN` is reduced to `contents: read` and `issues: write`.
-* **Not relied on: the "Request a GitHub Pages build" API** (`POST /repos/{owner}/{repo}/pages/builds`). Verified from
-  GitHub's documentation: it builds "from the latest revision on the default branch" with "the same effect as pushing a
-  commit"; requests are limited to one concurrent build per repository and per requester (extra ones are queued); a
-  fine-grained token needs the repository permission **Pages: write**. GitHub does **not** document whether the built-in
-  `GITHUB_TOKEN` (`pages: write`) may call it, so the earlier draft's use of it is removed. It remains a possible manual
-  recovery with the owner's own token, nothing more.
-* **Also not proposed:** switching the site to publish from a GitHub Actions workflow (the other documented mechanism).
-  That changes the existing hosting setup (new Pages source, deployment environment), which was not asked for.
-* **Still unproven in practice:** that a push with this token builds the site in this particular repository has not been
-  observed, because nothing is enabled. The live check (step 8) is the proof: if the first run finishes green, it
-  worked. The owner should run it once by hand after enabling it and watch.
+* **Proof of publication:** the workflow only succeeds when the **public** site (`https://k1kfx.com/satellites/data/status.json`)
+  shows the expected new download time. The check adds a cache-busting query so a cached copy cannot fool it (Pages serves
+  `max-age=600`), and allows 15 minutes for the build and deployment.
+* **Not proposed:** switching the site to publish from a GitHub Actions workflow, which would change the existing hosting
+  setup; a separate Cloudflare project; any DNS change.
+* **Still requires one approved end-to-end test:** no run of the real workflow has happened. The request/poll steps, the
+  token's permissions on the real repository, and the behavior of a Pages build requested this way can only be confirmed by
+  one manual "Run workflow" after approval. The exact commands are reviewed but could not be executed here.
 
 ## Which planner version is published (important)
 
@@ -82,7 +91,7 @@ feature branch, and they must not silently build a stale or unapproved branch. S
 * The workflow lives in the **website** repo's `main`, which is what a schedule runs.
 * It does **not** build "whatever the planner's default branch is". The planner's `main` still holds only the initial
   commit, and the approved code is on `feature/strict-eligibility`, unmerged. The workflow instead checks out **one
-  pinned commit**, `PLANNER_SHA` at the top of the file, currently `392261c6157d850a4f8a156e7288eff647cce195`, the commit
+  pinned commit**, `PLANNER_SHA` at the top of the file, currently `b31c2540bab6c861872acc67f5cdd07f9e915a22`, the commit
   containing everything described here (it must be pushed to the planner repository first so the pin exists remotely).
 * Nothing is merged for this. To publish a newer planner version later, change `PLANNER_SHA` in a reviewed one-line commit
   to the website repo. A planner change is always a deliberate act, never a side effect of the daily schedule. (Merging
@@ -90,8 +99,11 @@ feature branch, and they must not silently build a stale or unapproved branch. S
 
 ## Required settings, secrets and cost
 
-* **Secret: `SITE_PUSH_TOKEN`** (website repo → Settings → Secrets and variables → Actions). Nothing else. No credentials
-  appear in browser code.
+* **Secret: `SITE_PUSH_TOKEN`** (website repo → Settings → Secrets and variables → Actions), a fine-grained token with
+  Contents and Pages read/write on that one repository (above). Nothing else. No credentials appear in browser code.
+* **No overlapping runs:** a `concurrency` group queues a second run instead of racing the first (never cancelling one in
+  progress). **No loops:** the workflow has no `push` trigger; do not add a workflow to the website repo that triggers on
+  pushes to `satellites/` without excluding this one. **No overwrite:** pushes are never forced.
 * **Workflow permissions** (job level; the default is none): `contents: read`, `issues: write`. If the repository or its
   owner sets default workflow permissions to read-only, that is fine; the job asks for what it needs explicitly.
 * **Branch protection:** `main` is unprotected today. If rules are added later that require pull requests, the push will
