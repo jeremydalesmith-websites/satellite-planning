@@ -114,6 +114,17 @@ Independent prediction validation: see `docs/VALIDATION.md` (needs Python).
 * The results line "Keplers updated ... · Activity reports updated ..." is retrieval time (successful download), not an
   element epoch or a report time, and never implies a live check. A failed download must never advance a timestamp.
 
+## Calendar export (builder only so far: `src/export/ics.ts`)
+* The export is the SAVED plan exactly as saved (a static snapshot). It never recomputes or "fills in" details from current
+  predictions; details an older saved event did not store are covered by one concise note. It never says or implies that a
+  calendar entry updates automatically, and the description warns that the latest re-check may differ.
+* The calendar entry starts 10 minutes before the first saved AOS (setup time) and ends 5 minutes after the last saved LOS, with
+  a 15-minute minimum. These buffers exist ONLY in the exported entry; they never feed a prediction, a cluster, or a saved
+  event's stored interval (the "no setup/arrival buffers" rule above still holds for planning). Titles use the full-pass
+  maximum elevation and the AOS-to-LOS duration, without buffers.
+* No coordinates, callsigns, alarms or network access in the export. Times are written in UTC; the description shows the saved
+  planning zone and UTC. Whether a calendar app replaces or duplicates a re-import of the same UID is not promised.
+
 ## Privacy
 Treat the owner's identity and location as private. Do not put personal details
 in requests to external services; the refresh script uses a generic User-Agent

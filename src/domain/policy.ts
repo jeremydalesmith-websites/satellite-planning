@@ -79,3 +79,15 @@ export const SAVED_SHIFT_REPORT_SEC = 60;
 export const SAVED_ELEVATION_REPORT_DEG = 2;
 /** Max difference between peak times for an old and new pass to be "the same pass". */
 export const SAVED_MATCH_TOLERANCE_MIN = 10;
+
+/**
+ * CALENDAR EXPORT (saved events). The calendar entry starts this many minutes before the first saved AOS (setup time) and
+ * ends this many minutes after the last saved LOS; its total length is never below the minimum (a display preference, not a
+ * claim about any calendar app's own limits). These buffers are for the calendar entry only: they never feed a prediction,
+ * a cluster, or a saved event's stored interval.
+ */
+export const CALENDAR_SETUP_MIN = 10;
+export const CALENDAR_POST_MIN = 5;
+export const CALENDAR_MIN_EVENT_MIN = 15;
+/** The link back to the planner placed in every exported calendar entry (fixed; never the current page address). */
+export const PLANNER_URL = 'https://k1kfx.com/satellites/';
