@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CALENDAR_MIN_EVENT_MIN, CALENDAR_POST_MIN, CALENDAR_SETUP_MIN, PLANNER_URL } from '../src/domain/policy.ts';
+import { CALENDAR_MIN_EVENT_MIN, CALENDAR_POST_MIN, CALENDAR_SETUP_MIN } from '../src/domain/policy.ts';
 import {
   ICS_MIME,
   buildCalendarExport,
@@ -183,7 +183,7 @@ describe('sample labels (for a test file imported into a throwaway calendar)', (
     const sample = buildCalendarExport(s, BEFORE, { titlePrefix: 'SAMPLE — ', descriptionPrefix: 'SAMPLE: illustrative data.' });
     expect(prop(plain.content, 'SUMMARY')).toBe('ISS 75° 11m');
     expect(prop(sample.content, 'SUMMARY')).toBe('SAMPLE — ISS 75° 11m');
-    expect(unescape(prop(sample.content, 'DESCRIPTION')!)).toMatch(/^SAMPLE: illustrative data\.\n\nSTATIC SNAPSHOT/);
+    expect(unescape(prop(sample.content, 'DESCRIPTION')!)).toMatch(/^SAMPLE: illustrative data\.\n\nISS — /);
     for (const name of ['DTSTART', 'DTEND', 'UID', 'SEQUENCE']) expect(prop(sample.content, name)).toBe(prop(plain.content, name));
     expect(sample.filename).toBe(plain.filename);
   });
@@ -221,83 +221,145 @@ describe('titles', () => {
   });
 });
 
-describe('description: the setup, the snapshot and every pass', () => {
-  const text = desc([iss(EXTRAS), so50a(EXTRAS), so50b(EXTRAS)]);
+describe('description: compact, readable, exact', () => {
+  const single = desc([iss(EXTRAS)]);
 
-  it('opens with the static-snapshot warning: it does not update automatically and may differ from the latest re-check', () => {
-    const first = text.split('\n')[0]!;
-    expect(first).toMatch(/^STATIC SNAPSHOT/);
-    expect(first).toContain('does not update automatically');
-    expect(first).toMatch(/latest re-check may differ/);
-    expect(first).toContain(PLANNER_URL);
-    expect(first).toContain('plan saved on Thu, Nov 12, 2026');
+  it('single pass: exactly the agreed compact layout', () => {
+    expect(single).toBe(
+      [
+        'ISS — Saturday, November 14, 2026',
+        'All times CST',
+        '',
+        'Pass: 5:32:04–5:42:50 PM',
+        'Peak: 5:37:20 PM · 75°',
+        'Duration: 10 min 46 s',
+        'Above 40°: 5:34:10–5:40:30 PM · 6 min 20 s',
+        'Direction: NNE → SSE',
+        '',
+        'Transmit: 145.990 MHz · tone 67 Hz',
+        'Receive: 437.800 MHz',
+        '',
+        'Includes 10 min setup before and 5 min after.',
+        'ISS repeater availability depends on station operations.',
+        '',
+        'Static calendar copy—recheck times and status:',
+        'https://k1kfx.com/satellites/',
+      ].join('\n'),
+    );
   });
-  it('distinguishes setup start, first AOS, last LOS and the buffered calendar end, with the zone and UTC', () => {
-    expect(text).toContain('Setup starts (calendar start): Sat, Nov 14, 2026, 5:22:04 PM CST (2026-11-14 23:22:04 UTC)');
-    expect(text).toContain('First pass starts (first AOS): Sat, Nov 14, 2026, 5:32:04 PM CST (2026-11-14 23:32:04 UTC)');
-    expect(text).toContain('Last pass ends (last LOS): Sat, Nov 14, 2026, 7:59:12 PM CST (2026-11-15 01:59:12 UTC)');
-    expect(text).toContain('Calendar entry ends: Sat, Nov 14, 2026, 8:04:12 PM CST (2026-11-15 02:04:12 UTC)');
-    expect(text).toContain('Span from first AOS to last LOS: 2 h 27 min 08 s');
-    expect(text).toContain('The first 10 minutes of this entry are SETUP TIME, not satellite time.');
-    expect(text).toContain('5 minutes past the last pass');
+  it('keeps the exact pass information: start and end with seconds, peak time and elevation, duration, threshold interval, compass directions, frequencies and tone', () => {
+    for (const line of ['Pass: 5:32:04–5:42:50 PM', 'Peak: 5:37:20 PM · 75°', 'Duration: 10 min 46 s', 'Above 40°: 5:34:10–5:40:30 PM · 6 min 20 s', 'Direction: NNE → SSE', 'Transmit: 145.990 MHz · tone 67 Hz', 'Receive: 437.800 MHz']) {
+      expect(single).toContain(line);
+    }
   });
-  it('labels the setup time ahead of any pass block', () => {
-    expect(text.indexOf('SETUP TIME')).toBeLessThan(text.indexOf('PASS 1 of 3'));
+  it('states the date and zone once, and has none of the removed clutter: UTC times, calendar-boundary listings, sources, provenance, eligibility history', () => {
+    for (const gone of ['UTC', 'Setup starts', 'First pass starts', 'Last pass ends', 'Calendar entry ends', 'SETUP TIME', 'Source:', 'catalog note', 'manual', 'Eligibility', 'Heard', 'STATIC SNAPSHOT', 'saved on', 'ARISS', 'spacewalk']) expect(single).not.toContain(gone);
+    expect(single.match(/CST/g)).toHaveLength(1); // "All times CST", and no zone repeated on any time
+    expect(single.match(/November 14, 2026/g)).toHaveLength(1);
+    expect(single.length).toBeLessThan(600);
   });
-  it('gives each pass exact AOS/LOS with seconds and zone, the exact duration, and the peak time and elevation', () => {
-    expect(text).toContain('PASS 1 of 3: ISS (↑ 2 m · ↓ 70 cm)');
-    expect(text).toContain('Start (AOS): 5:32:04 PM CST (23:32:04 UTC)');
-    expect(text).toContain('End (LOS): 5:42:50 PM CST (23:42:50 UTC)');
-    expect(text).toContain('Duration: 10 min 46 s');
-    expect(text).toContain('Peak: 5:37:20 PM CST (23:37:20 UTC), maximum elevation 75°');
-    expect(text).toContain('PASS 2 of 3: SO-50');
-    expect(text).toContain('Duration: 12 min 00 s');
-    expect(text).toContain('Duration: 11 min 12 s');
+  it('ends with ONE short static-copy sentence and the planner link', () => {
+    expect(single.split('\n').slice(-2)).toEqual(['Static calendar copy—recheck times and status:', 'https://k1kfx.com/satellites/']);
+    expect(single.match(/k1kfx\.com/g)).toHaveLength(1);
+    expect(single.match(/Static calendar copy/g)).toHaveLength(1);
   });
-  it('gives the time above the selected threshold with its start and end, and the rise and set directions, when stored', () => {
-    expect(text).toContain('Time above 40°: 5:34:10 PM CST (23:34:10 UTC) to 5:40:30 PM CST (23:40:30 UTC) (6 min 20 s)');
-    expect(text).toContain('Rises NNE (22°), sets SSE (158°)');
+  it('one short buffer sentence, taken from the constants', () => {
+    expect(single).toContain(`Includes ${CALENDAR_SETUP_MIN} min setup before and ${CALENDAR_POST_MIN} min after.`);
+    expect(single.match(/setup/gi)).toHaveLength(1);
   });
-  it('gives radio settings: frequencies and the tone, never inventing a tone the catalog does not list', () => {
-    expect(text).toContain('Radio: transmit 145.990 MHz (67 Hz tone), listen 437.800 MHz');
-    expect(text).toContain('Radio: transmit 145.850 MHz (67 Hz tone), listen 436.795 MHz');
-    expect(desc([ao91()])).toContain('Radio: transmit 435.250 MHz (no tone listed in the catalog), listen 145.960 MHz');
+  it('never invents a tone the catalog does not list; frequencies keep three decimals', () => {
+    expect(desc([ao91()])).toContain('Transmit: 435.250 MHz · no tone listed');
+    expect(desc([ao91()])).toContain('Receive: 145.960 MHz');
   });
-  it('carries the operational warnings with their sources, as manual catalog notes', () => {
-    expect(text).toContain('Subject to ISS operations:');
-    expect(text).toMatch(/ARISS expects the ISS radios to operate full time/);
-    expect(text).toContain('arming'.length ? '74.4 Hz CTCSS tone' : '');
-    expect(text).toContain('manual catalog note, not live');
-    expect(text).toContain('Eligibility when saved: a recent "Heard" report for its FM repeater (not a live status check).');
+  it('warnings are brief: the ISS availability sentence, and the catalog\'s own one-sentence notes without sources', () => {
+    expect(desc([so50a(EXTRAS)])).toContain('The repeater has a 10-minute timer that must be armed before use: send a 2-second carrier with a 74.4 Hz CTCSS tone.');
+    expect(desc([so50a(EXTRAS)])).not.toContain('SO-50: '); // one satellite: no label needed
+    expect(desc([so50a(EXTRAS)])).not.toContain('availability depends'); // not an ISS-style repeater
+    expect(desc([ao91()])).not.toMatch(/availability|timer/);
   });
-  it('a sunlight-limited pass puts the sunlit-usable elevation and the restriction ahead of the pass times', () => {
+  it('a sunlight-limited pass states the sunlit-usable elevation and the restriction right under the heading, before the pass times', () => {
     const t = desc([ao91()]);
-    const block = t.slice(t.indexOf('PASS 1 of 1'));
-    expect(block).toContain('SUNLIGHT-ONLY REPEATER');
-    expect(block).toContain('Maximum elevation while sunlit: 62° (the full pass peaks at 85°). Sunlit operating time: 8 min 12 s of 11 min 06 s.');
-    expect(block).toContain('AMSAT asks that this repeater not be used while the satellite is in eclipse');
-    expect(block.indexOf('SUNLIGHT-ONLY REPEATER')).toBeLessThan(block.indexOf('Start (AOS)'));
-    expect(block.match(/not be used while the satellite is in eclipse/g)).toHaveLength(1); // stated once, not again under Warnings
+    const lines = t.split('\n');
+    expect(lines[3]).toBe('Sunlight only: usable while the satellite is in sunlight; sunlit peak 62° (pass peak 85°), 8 min 12 s of 11 min 06 s usable.');
+    expect(t.indexOf('Sunlight only')).toBeLessThan(t.indexOf('Pass:'));
+    expect(desc([ao91({ sunlight: 'partly-eclipsed' })])).toContain('Partly in Earth’s shadow.');
+    expect(desc([ao91({ eligibleMaxElevationDeg: null })])).toContain('no sunlit peak');
+    expect(desc([iss()])).not.toContain('Sunlight only');
   });
-  it('says when part of a sunlight-limited pass is in Earth’s shadow, and when the sunlit peak equals the pass peak', () => {
-    expect(desc([ao91({ sunlight: 'partly-eclipsed' })])).toContain('Part of the pass is in Earth’s shadow.');
-    expect(desc([ao91({ eligibleMaxElevationDeg: 85.2, operatingMs: 666_000 })])).toContain('(same as the pass peak)');
+});
+
+describe('several passes: compact blocks, shared notes once', () => {
+  const multi = desc([so50b(EXTRAS), iss(EXTRAS), so50a(EXTRAS)]);
+  it('opens with the pass count, date, zone and span, then one compact block per pass in time order', () => {
+    const lines = multi.split('\n');
+    expect(lines.slice(0, 3)).toEqual(['3 passes — Saturday, November 14, 2026', 'All times CST', 'Span: 2 h 27 min 08 s from first pass start to last pass end']);
+    expect(multi.indexOf('ISS · pass 1 of 3')).toBeLessThan(multi.indexOf('SO-50 · pass 2 of 3'));
+    expect(multi.indexOf('SO-50 · pass 2 of 3')).toBeLessThan(multi.indexOf('SO-50 · pass 3 of 3'));
+    expect(multi).toContain('Pass: 5:32:04–5:42:50 PM');
+    expect(multi).toContain('Pass: 6:10:30–6:22:30 PM');
+    expect(multi).toContain('Pass: 7:48:00–7:59:12 PM');
+    expect(multi.match(/^Peak: /gm)).toHaveLength(3);
+    expect(multi.match(/^Duration: /gm)).toHaveLength(3);
+    expect(multi.match(/^Transmit: /gm)).toHaveLength(3);
   });
-  it('ends with the planner link and a re-check reminder', () => {
-    expect(text).toMatch(/Planning estimate only\. Re-check the pass times and repeater status before the event\.\nPlanner: https:\/\/k1kfx\.com\/satellites\/$/);
+  it('the buffer sentence, each warning and the static-copy note with the link appear ONCE', () => {
+    expect(multi.match(/Includes 10 min setup before and 5 min after\./g)).toHaveLength(1);
+    expect(multi.match(/Static calendar copy/g)).toHaveLength(1);
+    expect(multi.match(/k1kfx\.com/g)).toHaveLength(1);
+    expect(multi.match(/ISS repeater availability depends on station operations\./g)).toHaveLength(1);
+    expect(multi.match(/74\.4 Hz CTCSS tone/g)).toHaveLength(1); // two SO-50 passes, one note
+    expect(multi).toContain('SO-50: The repeater has a 10-minute timer'); // several satellites: the note says which
+    expect(multi.split('\n').slice(-2)).toEqual(['Static calendar copy—recheck times and status:', 'https://k1kfx.com/satellites/']);
+  });
+  it('a pass on another local day than the first shows its date; the others do not', () => {
+    const late = so50a({ riseMs: Date.UTC(2026, 10, 15, 6, 30, 0), peakMs: Date.UTC(2026, 10, 15, 6, 36, 0), setMs: Date.UTC(2026, 10, 15, 6, 42, 0) }); // 12:30 AM CST on Sunday
+    const t = desc([iss(EXTRAS), late]);
+    expect(t).toContain('Pass: Sun, Nov 15, 12:30:00–12:42:00 AM');
+    expect(t).toContain('Peak: Sun, Nov 15, 12:36:00 AM · 62°');
+    expect(t).toContain('Pass: 5:32:04–5:42:50 PM'); // the first pass keeps the plain form
+  });
+});
+
+describe('alerts and past events appear at the very top', () => {
+  it('caller-supplied alerts (for example a lost eligibility from the latest re-check) come first, each with a warning sign', () => {
+    const t = calendarDescription(source([iss(EXTRAS)], 'America/Chicago', { alerts: ['ISS no longer has a recent report; re-check before the event.', 'SO-50 is not currently eligible.'] }), BEFORE);
+    expect(t.split('\n').slice(0, 4)).toEqual(['⚠ ISS no longer has a recent report; re-check before the event.', '⚠ SO-50 is not currently eligible.', '', 'ISS — Saturday, November 14, 2026']);
+  });
+  it('no alerts means the heading is the first line; blank alerts are ignored; the builder never makes one up', () => {
+    expect(desc([iss(EXTRAS)]).split('\n')[0]).toBe('ISS — Saturday, November 14, 2026');
+    expect(calendarDescription(source([iss()], 'America/Chicago', { alerts: ['  ', ''] }), BEFORE).split('\n')[0]).toBe('ISS — Saturday, November 14, 2026');
+    expect(desc([iss(EXTRAS)])).not.toContain('⚠');
+  });
+  it('alerts must be a list of text', () => {
+    expect(() => calendarDescription(source([iss()], 'America/Chicago', { alerts: 'oops' as unknown as string[] }), BEFORE)).toThrow(InvalidCalendarDataError);
+    expect(() => calendarDescription(source([iss()], 'America/Chicago', { alerts: [5 as unknown as string] }), BEFORE)).toThrow(InvalidCalendarDataError);
+  });
+  it('a past event is labeled past on the first line, and only when it is past; the calendar times do not change', () => {
+    const before = desc([iss(EXTRAS)], undefined, BEFORE);
+    const after = desc([iss(EXTRAS)], undefined, AFTER);
+    expect(before).not.toContain('Past event');
+    expect(after.split('\n').slice(0, 3)).toEqual(['Past event: these passes have already happened.', '', 'ISS — Saturday, November 14, 2026']);
+    expect(buildCalendarExport(source([iss()]), BEFORE).startMs).toBe(buildCalendarExport(source([iss()]), AFTER).startMs);
+  });
+  it('there is no time-dependent restriction: a past event still exports', () => {
+    expect(() => buildCalendarExport(source([iss()]), Date.UTC(2030, 0, 1))).not.toThrow();
+  });
+  it('alerts and the past label together: alerts first', () => {
+    const t = calendarDescription(source([iss()], 'America/Chicago', { alerts: ['ISS no longer qualifies.'] }), AFTER);
+    expect(t.split('\n').slice(0, 2)).toEqual(['⚠ ISS no longer qualifies.', 'Past event: these passes have already happened.']);
   });
 });
 
 describe('older saved events: one concise note, nothing inferred', () => {
   const old = desc([iss(), so50a()]);
-  it('omits direction and threshold lines and says ONCE that some details were not stored', () => {
-    expect(old).not.toMatch(/Rises |Time above/);
-    expect(old.match(/were not stored with this older saved event/g)).toHaveLength(1);
-    expect(old).not.toMatch(/not stored.*not stored/s);
+  it('omits direction and threshold lines and says ONCE that some details were not saved', () => {
+    expect(old).not.toMatch(/^Direction|^Above /m);
+    expect(old.match(/Some details were not saved with this older event, so they are left out\./g)).toHaveLength(1);
+    expect(old).toContain('Pass: 5:32:04–5:42:50 PM'); // everything that WAS saved is still exact
   });
   it('a new event with every detail stored has no such note, and a stored "never above" is stated, not omitted', () => {
-    expect(desc([iss(EXTRAS)])).not.toContain('not stored');
-    expect(desc([iss({ ...EXTRAS, aboveThreshold: null })])).toContain('Time above 40°: none');
+    expect(desc([iss(EXTRAS)])).not.toContain('not saved');
+    expect(desc([iss({ ...EXTRAS, aboveThreshold: null })])).toContain('Above 40°: none');
   });
   it('the builder never reads current predictions: it imports no prediction, planner, storage or network code', () => {
     const src = readFileSync('src/export/ics.ts', 'utf8');
@@ -308,44 +370,34 @@ describe('older saved events: one concise note, nothing inferred', () => {
   });
 });
 
-describe('past events', () => {
-  it('are labeled past (and not otherwise); the entry itself is unchanged', () => {
-    const before = desc([iss(EXTRAS)], undefined, BEFORE);
-    const after = desc([iss(EXTRAS)], undefined, AFTER);
-    expect(before).not.toContain('PAST EVENT');
-    expect(after).toContain('PAST EVENT: the last pass of this saved plan ended Sat, Nov 14, 2026, 5:42:50 PM CST (2026-11-14 23:42:50 UTC), before this file was exported.');
-    expect(buildCalendarExport(source([iss()]), BEFORE).startMs).toBe(buildCalendarExport(source([iss()]), AFTER).startMs);
-  });
-  it('there is no time-dependent restriction: a past event still exports', () => {
-    expect(() => buildCalendarExport(source([iss()]), Date.UTC(2030, 0, 1))).not.toThrow();
-  });
-});
-
-describe('time zones', () => {
+describe('time zones and clock formats', () => {
   it('descriptions use the saved planning zone: Kolkata (+5:30, next day) and Auckland (+13)', () => {
     const kolkata = desc([iss()], 'Asia/Kolkata');
-    expect(kolkata).toContain('Setup starts (calendar start): Sun, Nov 15, 2026, 4:52:04 AM GMT+5:30 (2026-11-14 23:22:04 UTC)');
-    expect(kolkata).toContain('Start (AOS): 5:02:04 AM GMT+5:30 (23:32:04 UTC)');
+    expect(kolkata.split('\n').slice(0, 2)).toEqual(['ISS — Sunday, November 15, 2026', 'All times GMT+5:30']);
+    expect(kolkata).toContain('Pass: 5:02:04–5:12:50 AM');
     const auckland = desc([iss()], 'Pacific/Auckland');
-    expect(auckland).toContain('Start (AOS): 12:32:04 PM GMT+13 (23:32:04 UTC)');
+    expect(auckland.split('\n').slice(0, 2)).toEqual(['ISS — Sunday, November 15, 2026', 'All times GMT+13']);
+    expect(auckland).toContain('Pass: 12:32:04–12:42:50 PM');
   });
-  it('a pass on the same local day as the setup start shows only its clock time; one on another local day shows its date', () => {
-    const t = desc([iss(), so50b()], 'America/Chicago'); // 7:48 PM CST: the same local day as the 5:22 PM setup start
-    expect(t).toContain('Start (AOS): 7:48:00 PM CST (01:48:00 UTC)');
-    const late = so50a({ riseMs: Date.UTC(2026, 10, 15, 6, 30, 0), peakMs: Date.UTC(2026, 10, 15, 6, 36, 0), setMs: Date.UTC(2026, 10, 15, 6, 42, 0) }); // 12:30 AM CST on Sunday
-    const next = desc([iss(), late], 'America/Chicago');
-    expect(next).toContain('Start (AOS): Sun, Nov 15, 2026, 12:30:00 AM CST (06:30:00 UTC)');
-    expect(next).toContain('Start (AOS): 5:32:04 PM CST (23:32:04 UTC)'); // the first pass keeps the short form
+  it('AM/PM is written once when both ends share it, and kept on both when they do not', () => {
+    const noon = pass({ noradId: ISS, name: 'ISS', riseMs: Date.UTC(2026, 10, 14, 17, 55, 0), peakMs: Date.UTC(2026, 10, 14, 18, 0, 0), setMs: Date.UTC(2026, 10, 14, 18, 4, 0) }); // 11:55 AM to 12:04 PM CST
+    expect(desc([noon])).toContain('Pass: 11:55:00 AM–12:04:00 PM');
+    expect(desc([iss(EXTRAS)])).toContain('Pass: 5:32:04–5:42:50 PM');
   });
-  it('across the US spring-forward (CST to CDT) the UTC calendar times stay exact and the description names both zones', () => {
+  it('a pass that ends after local midnight shows the end date', () => {
+    const night = pass({ noradId: ISS, name: 'ISS', riseMs: Date.UTC(2026, 10, 15, 5, 55, 0), peakMs: Date.UTC(2026, 10, 15, 6, 0, 0), setMs: Date.UTC(2026, 10, 15, 6, 5, 0) }); // 11:55 PM to 12:05 AM CST
+    expect(desc([night])).toContain('Pass: 11:55:00 PM–12:05:00 AM (Sun, Nov 15)');
+  });
+  it('across the US spring-forward the UTC calendar times stay exact and every time names its own zone', () => {
     const rise = Date.UTC(2027, 2, 14, 7, 55, 0); // 1:55 AM CST, five minutes before the clocks jump
-    const s = source([pass({ noradId: ISS, name: 'ISS', riseMs: rise, setMs: Date.UTC(2027, 2, 14, 8, 10, 0) })]);
+    const s = source([pass({ noradId: ISS, name: 'ISS', riseMs: rise, peakMs: Date.UTC(2027, 2, 14, 8, 2, 0), setMs: Date.UTC(2027, 2, 14, 8, 10, 0) })]);
     const ics = buildCalendarExport(s, Date.UTC(2027, 2, 1)).content;
     expect(prop(ics, 'DTSTART')).toBe('20270314T074500Z');
     expect(prop(ics, 'DTEND')).toBe('20270314T081500Z');
     const d = calendarDescription(s, Date.UTC(2027, 2, 1));
-    expect(d).toContain('1:45:00 AM CST');
-    expect(d).toContain('3:10:00 AM CDT');
+    expect(d).toContain('the clocks change during this event');
+    expect(d).toContain('Pass: 1:55:00 AM CST–3:10:00 AM CDT');
+    expect(d).not.toContain('All times');
   });
   it('the ACTUAL builder gives byte-identical output in processes whose system time zone really differs', () => {
     // Each child process is STARTED with TZ set, runs the real builder (not a format of an already-UTC value), and also reports
@@ -367,12 +419,10 @@ describe('time zones', () => {
       expect(r.status, `${tz}: ${r.stderr}`).toBe(0);
       return { tz, ...(JSON.parse(r.stdout) as { systemZone: string; offsetMin: number; naiveLocalHour: number; content: string }) };
     });
-    // the environments really differ: each child saw its own zone, with different offsets and different local hours
     const canonical = (z: string) => new Intl.DateTimeFormat('en-US', { timeZone: z }).resolvedOptions().timeZone; // ICU names Kolkata "Asia/Calcutta"
     expect(runs.map((r) => r.systemZone)).toEqual(zones.map(canonical));
     expect(runs.map((r) => r.offsetMin)).toEqual([-780, 360, -330, 0]);
     expect(new Set(runs.map((r) => r.naiveLocalHour)).size).toBe(4); // a zone-dependent computation WOULD have differed here
-    // ...and yet the exported file is identical
     for (const r of runs) expect(r.content).toBe(runs[0]!.content);
     expect(prop(runs[0]!.content, 'DTSTART')).toBe('20261114T232204Z');
   }, 60_000);
@@ -385,7 +435,8 @@ describe('time zones', () => {
       return r.stdout;
     };
     const a = asChicago('Pacific/Auckland');
-    expect(a).toContain('5:32:04 PM CST');
+    expect(a).toContain('All times CST');
+    expect(a).toContain('Pass: 5:32:04–5:42:50 PM');
     expect(a).toBe(asChicago('UTC'));
   }, 60_000);
 });

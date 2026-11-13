@@ -2,19 +2,22 @@
  * Calendar (.ics) export of a SAVED event: a pure builder with no network access and no storage access.
  *
  * What it exports is the saved plan exactly as saved. It never recomputes a prediction and never "fills in" a missing detail
- * from current data. The calendar entry is a STATIC SNAPSHOT: nothing updates it, and the planner's latest re-check may
- * differ (the description says so).
+ * from current data. The calendar entry is a STATIC SNAPSHOT: nothing updates it, and the description's last sentence says it
+ * is a static copy to re-check in the planner.
  *
  * Calendar times: start = first saved AOS minus the setup buffer (rounded down to a whole second); end = last saved LOS plus
  * the post-pass buffer (rounded up to a whole second), and never shorter than the minimum length. All DTSTART/DTEND values
- * are written in UTC, so they are unambiguous without a time-zone definition. The description shows clock times in the
- * event's saved planning zone (with the zone name) and in UTC.
+ * are written in UTC, so they are unambiguous without a time-zone definition. The description is deliberately COMPACT: the
+ * date and the event's saved planning zone are stated once ("All times CST") and times carry no zone or UTC after that; there
+ * is one short block per pass, one buffer sentence, brief warnings once, and the static-copy sentence with the planner link.
+ * Longer explanations belong in the planner, not in the calendar entry.
  *
  * Deliberately NOT included: observer coordinates, callsigns, alarms, attendees, a location. The VEVENT has a stable UID and
- * SEQUENCE 0; whether a calendar app replaces an earlier import with the same UID or creates a duplicate depends on the app
- * and is not promised here.
+ * SEQUENCE 0. OBSERVED, in one Google Calendar test by the owner: importing the identical file a second time did not create a
+ * duplicate. That is ONE observation about identical files in ONE calendar: it is not evidence that Google (or any other
+ * calendar) replaces an entry whose content changed, or that other calendars behave the same, and nothing here promises it.
  */
-import { ACTIVITIES, compactBands } from '../catalog/catalog.ts';
+import { ACTIVITIES } from '../catalog/catalog.ts';
 import type { FmActivity } from '../catalog/catalog.ts';
 import { CALENDAR_MIN_EVENT_MIN, CALENDAR_POST_MIN, CALENDAR_SETUP_MIN, PLANNER_URL } from '../domain/policy.ts';
 import type { Criteria, Interval, Ms } from '../domain/types.ts';
@@ -42,6 +45,11 @@ export interface CalendarSource {
   timeZone: string;
   criteria: Pick<Criteria, 'minElevationDeg'>;
   original: { counted: readonly CalendarPass[] };
+  /**
+   * Short warnings supplied by the caller (for example, from the planner's latest re-check: "ISS no longer has a recent report"). They
+   * are printed first, each with a warning sign. The builder never works them out itself: it only exports the saved plan.
+   */
+  alerts?: readonly string[];
 }
 
 export interface CalendarTimes {
@@ -104,6 +112,7 @@ function validateContext(source: CalendarSource, exportedAtMs: Ms): void {
   if (!isTime(exportedAtMs)) throw new InvalidCalendarDataError('Cannot export: the export time is invalid.');
   if (!isTime(source.savedAtMs)) throw new InvalidCalendarDataError('Cannot export: the saved time is invalid.');
   if (!isNumber(source.criteria.minElevationDeg)) throw new InvalidCalendarDataError('Cannot export: the saved elevation threshold is invalid.');
+  if (source.alerts !== undefined && (!Array.isArray(source.alerts) || source.alerts.some((a) => typeof a !== 'string'))) throw new InvalidCalendarDataError('Cannot export: the alerts must be a list of text.');
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: source.timeZone });
   } catch {
@@ -161,14 +170,14 @@ export function calendarTitle(passes: readonly CalendarPass[]): string {
 /* ------------------------------------------------------------------ description */
 
 // Intl uses a narrow no-break space before AM/PM in current ICU data; keep the text plain.
-const plain = (s: string) => s.replace(/[\u202f\u00a0]/g, ' ');
+const plain = (s: string) => s.replace(/[  ]/g, ' ');
+const fmtParts = (ms: Ms, tz: string, opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { timeZone: tz, ...opts }).formatToParts(ms);
 const zoned = (ms: Ms, tz: string, opts: Intl.DateTimeFormatOptions) => plain(new Intl.DateTimeFormat('en-US', { timeZone: tz, ...opts }).format(ms));
-const FULL: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short' };
-const CLOCK: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short' };
-const DAY: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' };
-const utcFull = (ms: Ms) => `${new Date(ms).toISOString().slice(0, 19).replace('T', ' ')} UTC`;
-const utcClock = (ms: Ms) => `${new Date(ms).toISOString().slice(11, 19)} UTC`;
-const full = (ms: Ms, tz: string) => `${zoned(ms, tz, FULL)} (${utcFull(ms)})`;
+const LONG_DAY: Intl.DateTimeFormatOptions = { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' };
+const SHORT_DAY: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric' };
+const CLOCK: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', second: '2-digit' };
+const zoneName = (ms: Ms, tz: string) => fmtParts(ms, tz, { timeZoneName: 'short' }).find((p) => p.type === 'timeZoneName')?.value ?? tz;
+const dayPeriod = (ms: Ms, tz: string) => fmtParts(ms, tz, { hour: 'numeric', hour12: true }).find((p) => p.type === 'dayPeriod')?.value ?? '';
 
 /** "10 min 46 s"; "2 h 01 min 12 s" from an hour up. */
 export function exactDuration(ms: number): string {
@@ -181,96 +190,111 @@ export function exactDuration(ms: number): string {
 }
 
 const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
-const direction = (az: number) => `${COMPASS[Math.round((((az % 360) + 360) % 360) / 22.5) % 16]} (${Math.round(az)}°)`;
+const compass = (az: number) => COMPASS[Math.round((((az % 360) + 360) % 360) / 22.5) % 16]!;
 const activityOf = (noradId: number): FmActivity | undefined => ACTIVITIES.find((a) => a.noradId === noradId);
-const sourceNote = (r: { source: { label: string }; asOf: string }) => `(Source: ${r.source.label}; text as of ${r.asOf}; manual catalog note, not live)`;
 
-const STATE_TEXT: Record<string, string> = {
-  'recently-reported-active': 'a recent "Heard" report for its FM repeater (not a live status check)',
-};
+/**
+ * How times are written. The event's saved zone is stated ONCE ("All times CST") and times carry no zone or UTC after that. If the
+ * clocks change during the event (two zone names), every time carries its own zone name instead, so nothing is ambiguous.
+ */
+function timeStyle(tz: string, instants: readonly Ms[], firstAosMs: Ms) {
+  const names = [...new Set(instants.map((ms) => zoneName(ms, tz)))];
+  const mixed = names.length > 1;
+  const firstDay = zoned(firstAosMs, tz, SHORT_DAY);
+  const clock = (ms: Ms) => `${zoned(ms, tz, CLOCK)}${mixed ? ` ${zoneName(ms, tz)}` : ''}`;
+  const onDay = (ms: Ms) => (zoned(ms, tz, SHORT_DAY) === firstDay ? '' : `${zoned(ms, tz, SHORT_DAY)}, `);
+  /** "6:21:07–6:31:53 PM" (one AM/PM when both ends share it); a date appears only when it differs from the event's first day. */
+  const range = (a: Ms, b: Ms) => {
+    const collapse = !mixed && dayPeriod(a, tz) === dayPeriod(b, tz);
+    const left = collapse ? clock(a).replace(/ [AP]M$/, '') : clock(a);
+    const tail = zoned(b, tz, SHORT_DAY) !== zoned(a, tz, SHORT_DAY) ? ` (${zoned(b, tz, SHORT_DAY)})` : '';
+    return `${onDay(a)}${left}–${clock(b)}${tail}`;
+  };
+  return {
+    zoneLine: mixed ? `Times are in the ${tz} time zone; the clocks change during this event.` : `All times ${names[0]}`,
+    clock,
+    range,
+    at: (ms: Ms) => `${onDay(ms)}${clock(ms)}`,
+  };
+}
+type TimeStyle = ReturnType<typeof timeStyle>;
 
-function passBlock(p: CalendarPass, index: number, total: number, tz: string, thresholdDeg: number, setupDay: string): string[] {
+function passLines(p: CalendarPass, style: TimeStyle, thresholdDeg: number): string[] {
   const act = activityOf(p.noradId);
-  const day = (ms: Ms) => (zoned(ms, tz, DAY) === setupDay ? '' : `${zoned(ms, tz, DAY)}, `);
-  const at = (ms: Ms) => `${day(ms)}${zoned(ms, tz, CLOCK)} (${utcClock(ms)})`;
-  const lines = [`PASS ${index + 1} of ${total}: ${p.name}${act ? ` (${compactBands(act)})` : ''}`];
-
+  const lines: string[] = [];
   if (act?.sunlightRequired) {
-    const same = p.eligibleMaxElevationDeg !== null && Math.abs(p.eligibleMaxElevationDeg - p.fullMaxElevationDeg) < 0.5;
-    lines.push('  SUNLIGHT-ONLY REPEATER: usable only while the satellite itself is in sunlight (not local daylight).');
-    lines.push(
-      `  Maximum elevation while sunlit: ${p.eligibleMaxElevationDeg === null ? 'none' : `${Math.round(p.eligibleMaxElevationDeg)}°`}` +
-        `${same ? ' (same as the pass peak)' : ` (the full pass peaks at ${Math.round(p.fullMaxElevationDeg)}°)`}. ` +
-        `Sunlit operating time: ${exactDuration(p.operatingMs)} of ${exactDuration(p.setMs - p.riseMs)}.` +
-        `${p.sunlight === 'partly-eclipsed' ? ' Part of the pass is in Earth’s shadow.' : ''}`,
-    );
-    for (const r of act.restrictions.filter((x) => x.kind === 'sunlight-only')) lines.push(`  ${r.text} ${sourceNote(r)}`);
+    const peak = p.eligibleMaxElevationDeg === null ? 'no sunlit peak' : `sunlit peak ${Math.round(p.eligibleMaxElevationDeg)}° (pass peak ${Math.round(p.fullMaxElevationDeg)}°)`;
+    lines.push(`Sunlight only: usable while the satellite is in sunlight; ${peak}, ${exactDuration(p.operatingMs)} of ${exactDuration(p.setMs - p.riseMs)} usable.${p.sunlight === 'partly-eclipsed' ? ' Partly in Earth’s shadow.' : ''}`);
   }
-
-  lines.push(`  Start (AOS): ${at(p.riseMs)}`);
-  lines.push(`  End (LOS): ${at(p.setMs)}`);
-  lines.push(`  Duration: ${exactDuration(p.setMs - p.riseMs)}`);
-  lines.push(`  Peak: ${at(p.peakMs)}, maximum elevation ${Math.round(p.fullMaxElevationDeg)}°`);
+  lines.push(`Pass: ${style.range(p.riseMs, p.setMs)}`);
+  lines.push(`Peak: ${style.at(p.peakMs)} · ${Math.round(p.fullMaxElevationDeg)}°`);
+  lines.push(`Duration: ${exactDuration(p.setMs - p.riseMs)}`);
   if (p.aboveThreshold !== undefined) {
     lines.push(
       p.aboveThreshold === null
-        ? `  Time above ${thresholdDeg}°: none`
-        : `  Time above ${thresholdDeg}°: ${at(p.aboveThreshold.start)} to ${at(p.aboveThreshold.end)} (${exactDuration(p.aboveThreshold.end - p.aboveThreshold.start)})`,
+        ? `Above ${thresholdDeg}°: none`
+        : `Above ${thresholdDeg}°: ${style.range(p.aboveThreshold.start, p.aboveThreshold.end)} · ${exactDuration(p.aboveThreshold.end - p.aboveThreshold.start)}`,
     );
   }
-  if (p.riseAzDeg !== undefined && p.setAzDeg !== undefined) lines.push(`  Rises ${direction(p.riseAzDeg)}, sets ${direction(p.setAzDeg)}`);
-
+  if (p.riseAzDeg !== undefined && p.setAzDeg !== undefined) lines.push(`Direction: ${compass(p.riseAzDeg)} → ${compass(p.setAzDeg)}`);
   if (act) {
-    const tone = act.uplink.ctcssHz ? `${act.uplink.ctcssHz} Hz tone` : 'no tone listed in the catalog';
-    lines.push(`  Radio: transmit ${act.uplink.mhz.toFixed(3)} MHz (${tone}), listen ${act.downlink.mhz.toFixed(3)} MHz`);
+    lines.push('', `Transmit: ${act.uplink.mhz.toFixed(3)} MHz · ${act.uplink.ctcssHz ? `tone ${act.uplink.ctcssHz} Hz` : 'no tone listed'}`, `Receive: ${act.downlink.mhz.toFixed(3)} MHz`);
   } else {
-    lines.push('  Radio: no catalog entry for this satellite.');
+    lines.push('', 'Radio settings: no catalog entry for this satellite.');
   }
-
-  const warnings: string[] = [];
-  if (act) {
-    for (const r of act.restrictions) {
-      if (r.kind === 'interruptible') warnings.push(`${r.badge ?? 'Subject to interruptions'}: ${r.text} ${sourceNote(r)}`);
-      else if (r.kind === 'note') warnings.push(`${r.text} ${sourceNote(r)}`);
-    }
-  }
-  warnings.push(`Eligibility when saved: ${STATE_TEXT[p.statusState] ?? p.statusState}.`);
-  lines.push('  Warnings:', ...warnings.map((w) => `  - ${w}`));
   return lines;
 }
 
-/** The plain-text description: setup, snapshot and per-pass details. */
+/** Brief operational warnings, each once per satellite: ISS-style interruptions and the catalog's own one-sentence notes. */
+function warningLines(passes: readonly CalendarPass[]): string[] {
+  const satellites = new Set(passes.map((p) => p.noradId));
+  const out: string[] = [];
+  for (const id of satellites) {
+    const act = activityOf(id);
+    if (!act) continue;
+    const label = satellites.size > 1 ? `${act.name}: ` : '';
+    if (act.interruptible) out.push(`${act.name} repeater availability depends on station operations.`);
+    for (const r of act.restrictions) if (r.kind === 'note') out.push(`${label}${r.text}`);
+  }
+  return out;
+}
+
+/**
+ * The compact, plain-text description: date and zone stated once, one short block per pass (exact start and end with seconds,
+ * peak, duration, stored threshold interval and directions, radio settings), one buffer sentence, brief warnings once, and one
+ * static-copy sentence with the planner link. Supporting explanations belong in the planner, not in the calendar entry.
+ */
 export function calendarDescription(source: CalendarSource, exportedAtMs: Ms): string {
   validateContext(source, exportedAtMs);
   const tz = source.timeZone;
   const passes = inTimeOrder(source.original.counted);
   const t = calendarTimes(passes);
-  const setupDay = zoned(t.startMs, tz, DAY);
+  const instants = [t.startMs, t.endMs, ...passes.flatMap((p) => [p.riseMs, p.peakMs, p.setMs, ...(p.aboveThreshold ? [p.aboveThreshold.start, p.aboveThreshold.end] : [])])];
+  const style = timeStyle(tz, instants, t.firstAosMs);
   const out: string[] = [];
 
-  out.push(
-    `STATIC SNAPSHOT: this calendar entry was exported from a plan saved on ${zoned(source.savedAtMs, tz, DAY)}. It does not update automatically, ` +
-      'and the planner’s latest re-check may differ (predicted pass times shift as orbital data is refreshed). ' +
-      `Re-check in the planner before the event: ${PLANNER_URL}`,
-  );
-  if (exportedAtMs > t.lastLosMs) out.push(`PAST EVENT: the last pass of this saved plan ended ${full(t.lastLosMs, tz)}, before this file was exported.`);
+  const alerts = (source.alerts ?? []).filter((a) => a.trim() !== '');
+  for (const a of alerts) out.push(`⚠ ${a}`);
+  if (exportedAtMs > t.lastLosMs) out.push('Past event: these passes have already happened.');
+  if (out.length > 0) out.push('');
 
-  out.push('', 'CALENDAR TIMES');
-  out.push(`Setup starts (calendar start): ${full(t.startMs, tz)}`);
-  out.push(`First pass starts (first AOS): ${full(t.firstAosMs, tz)}`);
-  out.push(`Last pass ends (last LOS): ${full(t.lastLosMs, tz)}`);
-  out.push(`Calendar entry ends: ${full(t.endMs, tz)}`);
-  if (passes.length > 1) out.push(`Span from first AOS to last LOS: ${exactDuration(t.lastLosMs - t.firstAosMs)}`);
-  out.push(
-    `The first ${Math.round((t.firstAosMs - t.startMs) / MIN)} minutes of this entry are SETUP TIME, not satellite time. ` +
-      `The entry runs ${CALENDAR_POST_MIN} minutes past the last pass${t.extendedToMinimum ? `, extended so the entry is at least ${CALENDAR_MIN_EVENT_MIN} minutes long` : ''}.`,
-  );
+  const day = zoned(t.firstAosMs, tz, LONG_DAY);
+  out.push(passes.length === 1 ? `${passes[0]!.name} — ${day}` : `${passes.length} passes — ${day}`);
+  out.push(style.zoneLine);
+  if (passes.length > 1) out.push(`Span: ${exactDuration(t.lastLosMs - t.firstAosMs)} from first pass start to last pass end`);
 
-  passes.forEach((p, i) => out.push('', ...passBlock(p, i, passes.length, tz, source.criteria.minElevationDeg, setupDay)));
+  passes.forEach((p, i) => {
+    out.push('');
+    if (passes.length > 1) out.push(`${p.name} · pass ${i + 1} of ${passes.length}`);
+    out.push(...passLines(p, style, source.criteria.minElevationDeg));
+  });
 
-  const missing = passes.some((p) => p.riseAzDeg === undefined || p.setAzDeg === undefined || p.aboveThreshold === undefined);
-  if (missing) out.push('', 'Some details (rise and set directions, time above the elevation threshold) were not stored with this older saved event, so they are not included.');
-  out.push('', 'Planning estimate only. Re-check the pass times and repeater status before the event.', `Planner: ${PLANNER_URL}`);
+  out.push('', `Includes ${CALENDAR_SETUP_MIN} min setup before and ${CALENDAR_POST_MIN} min after.${t.extendedToMinimum ? ` Extended to the ${CALENDAR_MIN_EVENT_MIN}-minute minimum.` : ''}`);
+  out.push(...warningLines(passes));
+  if (passes.some((p) => p.riseAzDeg === undefined || p.setAzDeg === undefined || p.aboveThreshold === undefined)) {
+    out.push('Some details were not saved with this older event, so they are left out.');
+  }
+  out.push('', 'Static calendar copy—recheck times and status:', PLANNER_URL);
   return out.join('\n');
 }
 

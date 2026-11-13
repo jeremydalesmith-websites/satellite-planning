@@ -117,13 +117,17 @@ Independent prediction validation: see `docs/VALIDATION.md` (needs Python).
 ## Calendar export (builder only so far: `src/export/ics.ts`)
 * The export is the SAVED plan exactly as saved (a static snapshot). It never recomputes or "fills in" details from current
   predictions; details an older saved event did not store are covered by one concise note. It never says or implies that a
-  calendar entry updates automatically, and the description warns that the latest re-check may differ.
+  calendar entry updates automatically: the description ends with "Static calendar copy—recheck times and status:" and the
+  planner link. The description is kept compact (date and zone once, no UTC, no provenance or eligibility narration); the full
+  explanations live in the planner. A lost-eligibility warning supplied by the caller goes first, with a warning sign.
 * The calendar entry starts 10 minutes before the first saved AOS (setup time) and ends 5 minutes after the last saved LOS, with
   a 15-minute minimum. These buffers exist ONLY in the exported entry; they never feed a prediction, a cluster, or a saved
   event's stored interval (the "no setup/arrival buffers" rule above still holds for planning). Titles use the full-pass
   maximum elevation and the AOS-to-LOS duration, without buffers.
-* No coordinates, callsigns, alarms or network access in the export. Times are written in UTC; the description shows the saved
-  planning zone and UTC. Whether a calendar app replaces or duplicates a re-import of the same UID is not promised.
+* No coordinates, callsigns, alarms or network access in the export. DTSTART/DTEND are written in UTC; the description shows
+  times in the saved planning zone, named once. Re-import behavior is not promised: in ONE Google Calendar test, importing an
+  identical file again did not create a duplicate (an observation about identical files in one calendar, not evidence that
+  changed entries are replaced or that other calendars behave the same).
 
 ## Privacy
 Treat the owner's identity and location as private. Do not put personal details
