@@ -52,7 +52,6 @@ export interface PassGeometry {
 
 export type ActivityKind = 'fm-repeater';
 
-export type BandLetter = 'V' | 'U';
 export type BandConfig = 'V/U' | 'U/V';
 
 export interface Criteria {

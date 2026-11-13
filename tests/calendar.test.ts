@@ -5,19 +5,14 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CALENDAR_MIN_EVENT_MIN, CALENDAR_POST_MIN, CALENDAR_SETUP_MIN } from '../src/domain/policy.ts';
 import {
-  ICS_MIME,
-  buildCalendarExport,
   calendarDescription,
   calendarTimes,
   calendarTitle,
-  calendarUid,
   enforceMinimumLength,
-  escapeText,
   exactDuration,
-  foldLine,
   InvalidCalendarDataError,
-} from '../src/export/ics.ts';
-import type { CalendarPass, CalendarSource } from '../src/export/ics.ts';
+} from '../src/export/calendar.ts';
+import type { CalendarPass, CalendarSource } from '../src/export/calendar.ts';
 
 /**
  * CALENDAR EXPORT (builder only; no UI yet). The export is the SAVED plan as saved: start 10 minutes before the first saved
@@ -67,9 +62,6 @@ const source = (counted: CalendarPass[], tz = 'America/Chicago', over: Partial<C
 const BEFORE = Date.UTC(2026, 10, 13, 12, 0, 0); // an export made before the event
 const AFTER = Date.UTC(2026, 10, 16, 12, 0, 0);
 
-const unfold = (ics: string) => ics.replace(/\r\n[ \t]/g, '').split('\r\n').filter((l) => l !== '');
-const prop = (ics: string, name: string) => unfold(ics).find((l) => l.startsWith(`${name}:`))?.slice(name.length + 1);
-const unescape = (v: string) => v.replace(/\\n/g, '\n').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\');
 const desc = (counted: CalendarPass[], tz?: string, exportedAt = BEFORE, over?: Partial<CalendarSource>) => calendarDescription(source(counted, tz, over), exportedAt);
 
 afterEach(() => vi.restoreAllMocks());
@@ -150,7 +142,6 @@ describe('broken pass data is rejected, never made to look valid', () => {
       () => calendarTimes(s.original.counted),
       () => calendarTitle(s.original.counted),
       () => calendarDescription(s, BEFORE),
-      () => buildCalendarExport(s, BEFORE),
     ]) {
       expect(run).toThrow(InvalidCalendarDataError);
       expect(run).toThrow(message);
@@ -158,38 +149,25 @@ describe('broken pass data is rejected, never made to look valid', () => {
   });
   it('a broken pass among valid ones rejects the whole event (no partial entry), and the message names the pass', () => {
     const s = source([iss(EXTRAS), so50a({ setMs: Date.UTC(2026, 10, 15, 0, 10, 30), peakMs: Date.UTC(2026, 10, 15, 0, 10, 30) })]);
-    expect(() => buildCalendarExport(s, BEFORE)).toThrow(/pass 2 \(SO-50\)/);
+    expect(() => calendarDescription(s, BEFORE)).toThrow(/pass 2 \(SO-50\)/);
   });
   it('a peak exactly on AOS or on LOS is allowed (the boundary is inclusive), one millisecond outside is not', () => {
-    expect(() => buildCalendarExport(withPass({ peakMs: T1 }), BEFORE)).not.toThrow();
-    expect(() => buildCalendarExport(withPass({ peakMs: T1 + 646_200 }), BEFORE)).not.toThrow();
-    expect(() => buildCalendarExport(withPass({ peakMs: T1 - 1 }), BEFORE)).toThrow(InvalidCalendarDataError);
+    expect(() => calendarDescription(withPass({ peakMs: T1 }), BEFORE)).not.toThrow();
+    expect(() => calendarDescription(withPass({ peakMs: T1 + 646_200 }), BEFORE)).not.toThrow();
+    expect(() => calendarDescription(withPass({ peakMs: T1 - 1 }), BEFORE)).toThrow(InvalidCalendarDataError);
   });
   it('an event with no passes, an invalid time zone, or an invalid export or saved time is rejected', () => {
     expect(() => calendarTimes([])).toThrow(InvalidCalendarDataError);
     expect(() => calendarTitle([])).toThrow(InvalidCalendarDataError);
-    expect(() => buildCalendarExport(source([]), BEFORE)).toThrow(InvalidCalendarDataError);
-    expect(() => buildCalendarExport(source([iss()], 'Mars/Olympus'), BEFORE)).toThrow(/time zone "Mars\/Olympus" is not valid/);
-    expect(() => buildCalendarExport(ok(), NaN)).toThrow(/export time is invalid/);
-    expect(() => buildCalendarExport(source([iss()], 'UTC', { savedAtMs: NaN }), BEFORE)).toThrow(/saved time is invalid/);
-    expect(() => buildCalendarExport(source([iss()], 'UTC', { criteria: { minElevationDeg: NaN } }), BEFORE)).toThrow(/elevation threshold/);
+    expect(() => calendarDescription(source([]), BEFORE)).toThrow(InvalidCalendarDataError);
+    expect(() => calendarDescription(source([iss()], 'Mars/Olympus'), BEFORE)).toThrow(/time zone "Mars\/Olympus" is not valid/);
+    expect(() => calendarDescription(ok(), NaN)).toThrow(/export time is invalid/);
+    expect(() => calendarDescription(source([iss()], 'UTC', { savedAtMs: NaN }), BEFORE)).toThrow(/saved time is invalid/);
+    expect(() => calendarDescription(source([iss()], 'UTC', { criteria: { minElevationDeg: NaN } }), BEFORE)).toThrow(/elevation threshold/);
   });
   it('valid data still exports, and optional details that are absent are not errors', () => {
-    expect(() => buildCalendarExport(ok(), BEFORE)).not.toThrow();
-    expect(() => buildCalendarExport(source([iss()]), BEFORE)).not.toThrow();
-  });
-});
-
-describe('sample labels (for a test file imported into a throwaway calendar)', () => {
-  it('prefix the title and the description without changing the times, the UID or SEQUENCE; a normal export has no prefix', () => {
-    const s = source([iss(EXTRAS)], 'America/Chicago', { id: 'sample-iss-1' });
-    const plain = buildCalendarExport(s, BEFORE);
-    const sample = buildCalendarExport(s, BEFORE, { titlePrefix: 'SAMPLE — ', descriptionPrefix: 'SAMPLE: illustrative data.' });
-    expect(prop(plain.content, 'SUMMARY')).toBe('ISS 75° 11m');
-    expect(prop(sample.content, 'SUMMARY')).toBe('SAMPLE — ISS 75° 11m');
-    expect(unescape(prop(sample.content, 'DESCRIPTION')!)).toMatch(/^SAMPLE: illustrative data\.\n\nISS — /);
-    for (const name of ['DTSTART', 'DTEND', 'UID', 'SEQUENCE']) expect(prop(sample.content, name)).toBe(prop(plain.content, name));
-    expect(sample.filename).toBe(plain.filename);
+    expect(() => calendarDescription(ok(), BEFORE)).not.toThrow();
+    expect(() => calendarDescription(source([iss()]), BEFORE)).not.toThrow();
   });
 });
 
@@ -338,15 +316,14 @@ describe('alerts and past events appear at the very top', () => {
     expect(() => calendarDescription(source([iss()], 'America/Chicago', { alerts: 'oops' as unknown as string[] }), BEFORE)).toThrow(InvalidCalendarDataError);
     expect(() => calendarDescription(source([iss()], 'America/Chicago', { alerts: [5 as unknown as string] }), BEFORE)).toThrow(InvalidCalendarDataError);
   });
-  it('a past event is labeled past on the first line, and only when it is past; the calendar times do not change', () => {
+  it('a past event is labeled past on the first line, and only when it is past', () => {
     const before = desc([iss(EXTRAS)], undefined, BEFORE);
     const after = desc([iss(EXTRAS)], undefined, AFTER);
     expect(before).not.toContain('Past event');
     expect(after.split('\n').slice(0, 3)).toEqual(['Past event: these passes have already happened.', '', 'ISS — Saturday, November 14, 2026']);
-    expect(buildCalendarExport(source([iss()]), BEFORE).startMs).toBe(buildCalendarExport(source([iss()]), AFTER).startMs);
   });
   it('there is no time-dependent restriction: a past event still exports', () => {
-    expect(() => buildCalendarExport(source([iss()]), Date.UTC(2030, 0, 1))).not.toThrow();
+    expect(() => calendarDescription(source([iss()]), Date.UTC(2030, 0, 1))).not.toThrow();
   });
   it('alerts and the past label together: alerts first', () => {
     const t = calendarDescription(source([iss()], 'America/Chicago', { alerts: ['ISS no longer qualifies.'] }), AFTER);
@@ -366,7 +343,7 @@ describe('older saved events: one concise note, nothing inferred', () => {
     expect(desc([iss({ ...EXTRAS, aboveThreshold: null })])).toContain('Above 40°: none');
   });
   it('the builder never reads current predictions: it imports no prediction, planner, storage or network code', () => {
-    const src = readFileSync('src/export/ics.ts', 'utf8');
+    const src = readFileSync('src/export/calendar.ts', 'utf8');
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''); // comments may mention these words
     const imports = [...code.matchAll(/from '([^']+)'/g)].map((m) => m[1]);
     expect([...new Set(imports)].sort()).toEqual(['../catalog/catalog.ts', '../domain/policy.ts', '../domain/types.ts', '../saved/saved.ts']); // saved.ts: types only
@@ -395,44 +372,17 @@ describe('time zones and clock formats', () => {
   it('across the US spring-forward the UTC calendar times stay exact and every time names its own zone', () => {
     const rise = Date.UTC(2027, 2, 14, 7, 55, 0); // 1:55 AM CST, five minutes before the clocks jump
     const s = source([pass({ noradId: ISS, name: 'ISS', riseMs: rise, peakMs: Date.UTC(2027, 2, 14, 8, 2, 0), setMs: Date.UTC(2027, 2, 14, 8, 10, 0) })]);
-    const ics = buildCalendarExport(s, Date.UTC(2027, 2, 1)).content;
-    expect(prop(ics, 'DTSTART')).toBe('20270314T074500Z');
-    expect(prop(ics, 'DTEND')).toBe('20270314T081500Z');
+    const times = calendarTimes(s.original.counted);
+    expect(times.startMs).toBe(Date.UTC(2027, 2, 14, 7, 45, 0));
+    expect(times.endMs).toBe(Date.UTC(2027, 2, 14, 8, 15, 0));
     const d = calendarDescription(s, Date.UTC(2027, 2, 1));
     expect(d).toContain('the clocks change during this event');
     expect(d).toContain('Pass: 1:55:00 AM CST–3:10:00 AM CDT');
     expect(d).not.toContain('All times');
   });
-  it('the ACTUAL builder gives byte-identical output in processes whose system time zone really differs', () => {
-    // Each child process is STARTED with TZ set, runs the real builder (not a format of an already-UTC value), and also reports
-    // what its own system zone is, so the test fails loudly if the environment ignored TZ and the comparison was vacuous.
-    const script = `
-      import { buildCalendarExport } from ${JSON.stringify(pathToFileURL(join(process.cwd(), 'src/export/ics.ts')).href)};
-      const input = JSON.parse(process.env.SRC_JSON);
-      const probe = new Date(Date.UTC(2026, 10, 14, 23, 32, 4));
-      process.stdout.write(JSON.stringify({
-        systemZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        offsetMin: probe.getTimezoneOffset(),
-        naiveLocalHour: probe.getHours(), // what a zone-dependent implementation would have used
-        content: buildCalendarExport(input.source, input.exportedAt).content,
-      }));`;
-    const payload = JSON.stringify({ source: source([iss(EXTRAS), so50a(EXTRAS), so50b(EXTRAS)]), exportedAt: BEFORE });
-    const zones = ['Pacific/Auckland', 'America/Chicago', 'Asia/Kolkata', 'UTC'];
-    const runs = zones.map((tz) => {
-      const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TZ: tz, SRC_JSON: payload }, encoding: 'utf8' });
-      expect(r.status, `${tz}: ${r.stderr}`).toBe(0);
-      return { tz, ...(JSON.parse(r.stdout) as { systemZone: string; offsetMin: number; naiveLocalHour: number; content: string }) };
-    });
-    const canonical = (z: string) => new Intl.DateTimeFormat('en-US', { timeZone: z }).resolvedOptions().timeZone; // ICU names Kolkata "Asia/Calcutta"
-    expect(runs.map((r) => r.systemZone)).toEqual(zones.map(canonical));
-    expect(runs.map((r) => r.offsetMin)).toEqual([-780, 360, -330, 0]);
-    expect(new Set(runs.map((r) => r.naiveLocalHour)).size).toBe(4); // a zone-dependent computation WOULD have differed here
-    for (const r of runs) expect(r.content).toBe(runs[0]!.content);
-    expect(prop(runs[0]!.content, 'DTSTART')).toBe('20261114T232204Z');
-  }, 60_000);
   it('the description follows the SAVED zone, not the process zone', () => {
     const asChicago = (tz: string) => {
-      const script = `import { calendarDescription } from ${JSON.stringify(pathToFileURL(join(process.cwd(), 'src/export/ics.ts')).href)};
+      const script = `import { calendarDescription } from ${JSON.stringify(pathToFileURL(join(process.cwd(), 'src/export/calendar.ts')).href)};
         const i = JSON.parse(process.env.SRC_JSON); process.stdout.write(calendarDescription(i.source, i.exportedAt));`;
       const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TZ: tz, SRC_JSON: JSON.stringify({ source: source([iss()], 'America/Chicago'), exportedAt: BEFORE }) }, encoding: 'utf8' });
       expect(r.status, r.stderr).toBe(0);
@@ -445,83 +395,6 @@ describe('time zones and clock formats', () => {
   }, 60_000);
 });
 
-describe('the .ics file', () => {
-  const ics = buildCalendarExport(source([iss(EXTRAS), so50a(EXTRAS), so50b(EXTRAS)]), BEFORE);
-
-  it('is a VCALENDAR with one VEVENT and the required properties, DTSTART/DTEND in UTC', () => {
-    const lines = unfold(ics.content);
-    expect(lines.slice(0, 3)).toEqual(['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//K1KFX//Satellite Pass Planner//EN']);
-    expect(lines.at(-1)).toBe('END:VCALENDAR');
-    expect(lines.filter((l) => l === 'BEGIN:VEVENT')).toHaveLength(1);
-    expect(prop(ics.content, 'DTSTART')).toBe('20261114T232204Z');
-    expect(prop(ics.content, 'DTEND')).toBe('20261115T020412Z');
-    expect(prop(ics.content, 'DTSTAMP')).toBe('20261113T120000Z');
-    expect(prop(ics.content, 'UID')).toBe('ev-test-1@k1kfx.com');
-    expect(prop(ics.content, 'SEQUENCE')).toBe('0');
-    expect(prop(ics.content, 'URL')).toBe('https://k1kfx.com/satellites/');
-    expect(prop(ics.content, 'TRANSP')).toBe('OPAQUE');
-    expect(ics.startMs).toBe(Date.UTC(2026, 10, 14, 23, 22, 4));
-    expect(ics.endMs).toBe(Date.UTC(2026, 10, 15, 2, 4, 12));
-  });
-  it('uses CRLF line endings throughout and ends with one', () => {
-    expect(ics.content.endsWith('\r\n')).toBe(true);
-    expect(ics.content.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/); // no bare CR or LF
-  });
-  it('every physical line is at most 75 octets and no multi-byte character is split', () => {
-    const decoder = new TextDecoder('utf-8', { fatal: true });
-    for (const line of ics.content.split('\r\n')) {
-      const bytes = new TextEncoder().encode(line);
-      expect(bytes.length).toBeLessThanOrEqual(75);
-      expect(() => decoder.decode(bytes)).not.toThrow();
-    }
-  });
-  it('the unfolded SUMMARY and DESCRIPTION round-trip to the title and description', () => {
-    expect(unescape(prop(ics.content, 'SUMMARY')!)).toBe('3 passes: ISS 75°, SO-50 62°, SO-50 70°');
-    expect(unescape(prop(ics.content, 'DESCRIPTION')!)).toBe(calendarDescription(source([iss(EXTRAS), so50a(EXTRAS), so50b(EXTRAS)]), BEFORE));
-  });
-  it('escapes commas, semicolons, backslashes and newlines in text values', () => {
-    expect(escapeText('a,b;c\\d\ne')).toBe('a\\,b\\;c\\\\d\\ne');
-    expect(prop(ics.content, 'SUMMARY')).toContain('ISS 75°\\, SO-50');
-  });
-  it('folds ASCII and multi-byte lines without losing a character', () => {
-    const ascii = `X:${'a'.repeat(200)}`;
-    expect(foldLine(ascii).split('\r\n').every((l) => new TextEncoder().encode(l).length <= 75)).toBe(true);
-    expect(foldLine(ascii).replace(/\r\n /g, '')).toBe(ascii);
-    const degrees = `X:${'°'.repeat(100)}`;
-    const folded = foldLine(degrees);
-    expect(folded.split('\r\n').every((l) => new TextEncoder().encode(l).length <= 75)).toBe(true);
-    expect(folded.replace(/\r\n /g, '')).toBe(degrees);
-    expect(foldLine('short')).toBe('short');
-  });
-  it('has no alarm, location, coordinates, attendees or callsigns', () => {
-    for (const banned of ['VALARM', 'LOCATION', 'GEO:', 'ATTENDEE', 'ORGANIZER', 'callsign']) expect(ics.content).not.toContain(banned);
-  });
-  it('even a full saved event (which holds the observer location) exports without it', () => {
-    const full = { ...source([iss(EXTRAS)]), location: { latDeg: 42.3517, lonDeg: -71.0642 }, selectedNoradIds: [ISS] };
-    const out = buildCalendarExport(full, BEFORE).content;
-    expect(out).not.toMatch(/42\.35|71\.06|latDeg|lonDeg/);
-  });
-  it('the UID is stable across exports; only DTSTAMP differs between two exports made before the event', () => {
-    const a = buildCalendarExport(source([iss(EXTRAS)]), BEFORE).content;
-    const b = buildCalendarExport(source([iss(EXTRAS)]), BEFORE + 6 * 60 * MIN).content; // still before the event
-    expect(prop(a, 'UID')).toBe(prop(b, 'UID'));
-    expect(a.replace(/DTSTAMP:\S+/, '')).toBe(b.replace(/DTSTAMP:\S+/, ''));
-    expect(a).not.toBe(b);
-  });
-  it('UIDs are safe for any saved-event id', () => {
-    expect(calendarUid('ev-m3x2k-ab12c')).toBe('ev-m3x2k-ab12c@k1kfx.com');
-    expect(calendarUid('ev 1/2:3 ;,')).toBe('ev-1-2-3@k1kfx.com');
-    expect(calendarUid('///')).toBe('event@k1kfx.com');
-  });
-  it('filenames are plain ASCII with the first AOS date and time in the event zone', () => {
-    expect(buildCalendarExport(source([iss()]), BEFORE).filename).toBe('ISS-75deg-11m-20261114-1732.ics');
-    expect(ics.filename).toBe('3-passes-20261114-1732.ics');
-    expect(buildCalendarExport(source([iss({ name: 'Odd/Name: "x"' })]), BEFORE).filename).toMatch(/^[A-Za-z0-9._-]+\.ics$/);
-    expect(ics.mimeType).toBe(ICS_MIME);
-    expect(ICS_MIME).toBe('text/calendar;charset=utf-8');
-  });
-});
-
 describe('the export is a pure snapshot', () => {
   const deepFreeze = <T,>(o: T): T => {
     if (o && typeof o === 'object') for (const v of Object.values(o)) deepFreeze(v);
@@ -529,14 +402,14 @@ describe('the export is a pure snapshot', () => {
   };
   it('does not modify the saved event (even a deep-frozen one) and is deterministic', () => {
     const s = deepFreeze(source([iss(EXTRAS), so50a(EXTRAS)]));
-    const first = buildCalendarExport(s, BEFORE);
-    expect(buildCalendarExport(s, BEFORE)).toEqual(first);
+    const first = calendarDescription(s, BEFORE);
+    expect(calendarDescription(s, BEFORE)).toEqual(first);
     expect(s.window).toEqual({ start: T1, end: Date.UTC(2026, 10, 15, 0, 22, 30) }); // the saved window is untouched
   });
   it('makes no network request', () => {
     const fetchSpy = vi.fn(() => { throw new Error('network access is not allowed'); });
     vi.stubGlobal('fetch', fetchSpy);
-    buildCalendarExport(source([iss(EXTRAS), so50a(EXTRAS)]), BEFORE);
+    calendarDescription(source([iss(EXTRAS), so50a(EXTRAS)]), BEFORE);
     expect(fetchSpy).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
@@ -545,32 +418,5 @@ describe('the export is a pure snapshot', () => {
     expect(exactDuration(59_400)).toBe('0 min 59 s');
     expect(exactDuration(8_827_600)).toBe('2 h 27 min 08 s'); // 2 h 27 min 07.6 s
     expect(exactDuration(-5)).toBe('0 min 00 s');
-  });
-});
-
-/**
- * A REAL iCalendar parser (ical.js), not a hand-written one. It is not a project dependency: it is installed in a scratch
- * folder and enabled with ICAL_JS_PATH=<path to ical.js/dist/ical.min.js or its package folder>. Without it these are skipped.
- */
-const icalPath = process.env.ICAL_JS_PATH;
-describe.skipIf(!icalPath)('validated with ical.js', () => {
-  const load = async () => {
-    const mod = (await import(/* @vite-ignore */ pathToFileURL(icalPath!).href)) as Record<string, unknown>;
-    return (mod.default ?? mod) as { parse: (s: string) => unknown[]; Component: new (j: unknown) => { getFirstSubcomponent: (n: string) => any; name: string }; Time: unknown };
-  };
-  it('parses without error and reads back the same instants, summary and description', async () => {
-    const ICAL = await load();
-    const counted = [iss(EXTRAS), so50a(EXTRAS), so50b(EXTRAS)];
-    const out = buildCalendarExport(source(counted), BEFORE);
-    const root = new ICAL.Component(ICAL.parse(out.content));
-    expect(root.name).toBe('vcalendar');
-    const ev = root.getFirstSubcomponent('vevent');
-    expect(ev.getFirstPropertyValue('summary')).toBe(out.title);
-    expect(ev.getFirstPropertyValue('description')).toBe(calendarDescription(source(counted), BEFORE));
-    expect(ev.getFirstPropertyValue('dtstart').toUnixTime() * 1000).toBe(out.startMs);
-    expect(ev.getFirstPropertyValue('dtend').toUnixTime() * 1000).toBe(out.endMs);
-    expect(ev.getFirstPropertyValue('uid')).toBe('ev-test-1@k1kfx.com');
-    expect(ev.getFirstPropertyValue('url')).toBe('https://k1kfx.com/satellites/');
-    expect(root.getFirstSubcomponent('vevent').getAllSubcomponents('valarm')).toHaveLength(0);
   });
 });

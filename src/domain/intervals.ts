@@ -18,22 +18,6 @@ export function intersect(a: Interval, b: Interval): Interval | null {
   return end > start ? { start, end } : null;
 }
 
-/** Intersection of two normalized lists. */
-export function intersectLists(a: readonly Interval[], b: readonly Interval[]): Interval[] {
-  const out: Interval[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < a.length && j < b.length) {
-    const x = a[i]!;
-    const y = b[j]!;
-    const s = intersect(x, y);
-    if (s) out.push(s);
-    if (x.end < y.end) i++;
-    else j++;
-  }
-  return out;
-}
-
 export function clipList(list: readonly Interval[], bounds: Interval): Interval[] {
   return list.map((i) => intersect(i, bounds)).filter((i): i is Interval => i !== null);
 }
@@ -49,12 +33,4 @@ export function overlaps(a: Interval, b: Interval): boolean {
 
 export function duration(i: Interval): Ms {
   return i.end - i.start;
-}
-
-export function totalDuration(list: readonly Interval[]): Ms {
-  return list.reduce((s, i) => s + duration(i), 0);
-}
-
-export function overlapMs(a: Interval, b: Interval): Ms {
-  return Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start));
 }

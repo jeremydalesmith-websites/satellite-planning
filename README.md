@@ -6,557 +6,190 @@ A static web app that answers one question:
 > amateur-radio satellite passes**, each reaching at least my chosen peak elevation, all within
 > a maximum span of two to three hours?
 
-It is a **planner, not a tracker**: no live tracking, globe, Doppler, radio/rotator
-control, logging, accounts or notifications. Everything runs in your browser;
-the site itself needs only static hosting (GitHub Pages).
+Live at **https://k1kfx.com/satellites/**. It is a **planner, not a tracker**: no live tracking, globe, Doppler,
+radio/rotator control, logging, accounts or notifications. Everything runs in the visitor's browser.
 
-Scope of this release: FM voice repeaters, cross-band on 2 m and 70 cm, both V/U
-and U/V. Deliberately **not** implemented (but the data model has room): SSTV,
-linear transponders, packet/APRS/telemetry/beacons, coordination with another
-station.
+Scope: FM voice repeaters, cross-band on 2 m and 70 cm, both V/U and U/V. Not built (by design): SSTV, linear
+transponders, packet/APRS/telemetry/beacons, coordination with another station, date-specific availability, recurrence.
 
----
-
-## Quick start (run it on your own computer)
-
-**You need:** [Git](https://git-scm.com/), [Node.js](https://nodejs.org/) **22.18 or newer** (check with `node -v`), a
-current web browser, and an internet connection for the first start. No account, API key or credentials are involved.
-
-The app lives on the `feature/strict-eligibility` branch (`main` only holds an initial commit), so clone that branch:
-
-```bash
-git clone --branch feature/strict-eligibility --single-branch https://github.com/jeremydalesmith-websites/satellite-planning.git
-cd satellite-planning
-npm ci          # installs exactly the locked dependency versions
-npm start       # downloads current satellite data, then starts the app
-```
-
-When it prints `Local: http://localhost:5173/`, open that address in your browser. Enter a latitude and longitude, tick
-the days and times you are free, and press **Find event windows**. Your location and settings stay in your own browser;
-nothing is sent anywhere.
-
-**About the data.** `npm start` downloads the current public data from AMSAT **once, at startup**: the orbital elements
-and the recent repeater status reports. **Leaving the app running does not refresh that data automatically**, and
-neither does pressing Search. To get newer data, stop the app (Ctrl+C) and run `npm start` again (or run
-`npm run refresh-data` in a second terminal and reload the page). The page shows how old both downloads are
-("Keplers updated 3 hours ago · Activity reports updated 3 hours ago") and warns when the activity reports are more than a day old. Because a satellite only counts if its FM
-repeater was reported working in the last 72 hours, stale data quietly means fewer (eventually zero) eligible satellites.
-
-**Windows PowerShell:** if `npm` fails with "running scripts is disabled on this system", either use Command Prompt
-instead, or type `npm.cmd` in place of `npm` (for example `npm.cmd start`). You do not need to change any system setting.
-
-`npm test` runs the automated tests (no network needed). Details on every part of the project follow below.
-
----
-
-## Contents
-1. [Requirement checklist](#requirement-checklist)
-2. [Local development](#local-development)
-3. [Testing](#testing)
-4. [Deployment and base path](#deployment-and-base-path)
-5. [Public data sources and refresh](#public-data-sources-and-refresh)
-6. [How passes are counted](#how-passes-are-counted)
-7. [Policies (tunable assumptions)](#policies-tunable-assumptions)
-8. [Catalog maintenance](#catalog-maintenance)
-9. [Long-range prediction limitations](#long-range-prediction-limitations)
-10. [Privacy](#privacy)
-11. [Deferred features](#deferred-features)
-12. [Project layout](#project-layout)
-
-## Requirement checklist
-
-Status key: **Done** = implemented and exercised by automated tests; **Done\*** = implemented, with
-the stated limitation or only partial automated coverage; **Not yet** = deliberately not in this phase.
-"Tests" names the files under `tests/`; "browser check" means a manual Playwright run (not part of `npm test`; see Testing for the one-time browser install).
-
-| # | Requirement | Status | Evidence | Limitations |
-|---|---|---|---|---|
-| 1 | Find clusters of qualifying FM passes inside my availability; search up to 42 days, marked provisional | Done | `cluster`, `availability`, `planner` | "Tentative/provisional" are wording tiers (>7 / >28 days past the elements epoch), not accuracy figures |
-| 2a | TypeScript, Vite, React, `satellite.js`, phone + desktop | Done | build, typecheck, browser check | Phone layout verified in a 390 px Chromium window only, not on real devices |
-| 2b | Static, GitHub Pages-compatible, configurable sub-directory | Done | `scripts/e2e-basepath.mjs`: 18/18 checks under `/satellites/` (relative and absolute base) and `/tools/sat/` | Not published; the mapping of `/satellites/` to this repository is a deployment-phase decision (see below) |
-| 2c | Local storage for preferences and saved events | Done | `ui` tests, browser reload check | Per-browser only; cleared if the user clears site data |
-| 2d | Scheduled GitHub Actions data refresh | Done | a small workflow in the website repository runs `scripts/refresh-data.ts` on a schedule (see "How the live site is published") | GitHub may delay or skip a scheduled run; the workflow also has a manual button |
-| 2e | No Firebase/DB/auth/paid API/LLM; no secrets in frontend | Done | code review | The refresh script sends a generic User-Agent |
-| 3 | FM repeaters only, 2 m/70 cm cross-band, V/U and U/V; extensible internal model | Done | `planner` (catalog) | `ActivityKind` has one value today; SSTV etc. deliberately not built |
-| 4 | Inputs: location (manual + optional button), timezone, date range, min peak elevation, maximum cluster span, minimum passes (1 to 10), validation | Done* | `ui` (validation, defaults, geolocation never called unprompted), `availability` | Real browser geolocation not tested; minimum passes accepts 1 to 10; elevation limited to 5 to 85 degrees |
-| 5 | Weekly Sun-Sat x Morning/Midday/Evening grid; editable boundaries; merge adjacent; the whole cluster must fit; explicit selection; accessible | Done* | `availability`, `ui` | Periods cannot cross midnight; touch usability not tested on real phones; a period boundary inside a spring-forward gap snaps to the moment the clocks jump |
-| 6 | Local SGP4 predictions with refined rise/peak/set/threshold/eclipse; three timestamps; Worker | Done | `predict` (vs 1 s brute force), `docs/VALIDATION.md` (vs Skyfield) | No confidence intervals (intended); observer height fixed at 0; no terrain mask; eclipse boundaries are sampled every 5 s, so a shadow shorter than 5 s inside one pass could be missed (none found in 5,028 real passes) |
-| 7a | Curated catalog in three separate layers with sources | Done* | `planner` (catalog) | Frequencies/restrictions are hand-copied from one AMSAT page dated 2026-10-31. "Status timestamp/explanation" is held per restriction (`asOf`, text) plus a catalog-wide review date, not as per-satellite fields |
-| 7b | AMSAT activity ingestion; FM-mode matching; four operating states; strict counting | Done | `ingest`, `eligibility` | Reports are volunteer observations; whether an operator filed under the right mode cannot be verified |
-| 8 | Sunlight at the satellite, partial eclipse, eligible-portion elevation, explained exclusions | Done* | `eligibility`, `planner` (ISS real-orbit tests), Skyfield comparison | Only AO-91 is flagged sunlight-dependent (only it has a cited source); any penumbra counts as not sunlit |
-| 9 | Cluster finder: full-pass non-overlapping count, maximum span, availability fit, duplicate removal, ranking, honest empty results | Done | `cluster`, `planner` (vs an independent brute-force reference) | Conservative single-station rule; touching passes count as sequential with no setup gap |
-| 10 | Event cards and pass cards with all required fields | Done* | browser check, screenshots | `EventCard`, `PassCard` and the timeline have no component tests; the timeline is decorative (`aria-hidden`) with the same information in text |
-| 11 | Saved events stay fixed; recomputed; changes and minimum warning | Done* | `saved` | Re-checked when the Saved tab is opened (not on app load); local to one browser. Events saved by an earlier version (fixed-window model) are not re-interpreted: they are left untouched in storage, not shown, and removable on request |
-| 12 | Separate testable modules; required test list; independent validation | Done* | the `npm test` suite; `docs/VALIDATION.md` | Skyfield validation needs Python and is not in `npm test`; it checks the implementation, not real-world accuracy |
-| 13 | README (dev, test, deploy, data, catalog, limits, deferred) | Done | this file | |
-
-## Local development
-
-Requires Node 22.18 or newer (the refresh script uses Node's built-in TypeScript support).
-Use `npm ci` (not `npm install`) so you get exactly the locked dependency versions; use
-`npm install` only when you are deliberately changing dependencies.
-
-```bash
-npm ci                 # installs exactly the versions in package-lock.json
-npm start              # downloads current AMSAT data once, then serves http://localhost:5173/ (no auto-refresh while running)
-```
-
-`npm start` = `npm run refresh-data` (download and validate AMSAT elements and
-status into `public/data/`) followed by `npm run dev`. If you already have data
-and only want the dev server, use `npm run dev`.
-
-**Where the first preview's data comes from.** `public/data/*.json` is
-generated and git-ignored, so a fresh checkout contains **no orbital data**.
-`npm run refresh-data` (part of `npm start`) downloads it from AMSAT. Without
-that step the app shows a clear "Data unavailable" message and **never
-substitutes data**. (The frozen files in `tests/fixtures/` are real but old
-and are used only by the tests, never by the app.) In the future deployment
-the scheduled workflow performs this download before each build.
-
-Behind an HTTP proxy, Node's `fetch` needs `NODE_USE_ENV_PROXY=1 npm run refresh-data`.
-
-Other scripts: `npm run typecheck`, `npm run build`, `npm run preview`,
-`node scripts/smoke.ts` (runs the whole pipeline on real data and prints windows).
-
-## Testing
-
-```bash
-npm test
-```
-
-The test suite (`npm test`) needs no network. It uses **clearly labelled fixtures**: real AMSAT
-elements and status reports frozen on 2026-11-12 in `tests/fixtures/`, plus
-synthetic geometry in `tests/factory.ts` where an exact boundary is needed.
-They cover elevation-threshold boundaries; partial eclipse and local-night vs
-satellite-sunlight; adjacent availability periods; time zones and DST
-(spring-forward, fall-back, southern hemisphere); overlapping passes;
-cluster bounds, maximum span and availability fit; repeated passes of one satellite; unknown/stale status;
-duplicate-cluster removal; saved events staying fixed; empty results and
-unavailable data; and form validation / accessibility of the availability grid.
-
-Independent validation against Skyfield is documented in
-[`docs/VALIDATION.md`](docs/VALIDATION.md) (112–223 passes per case agree to
-≤0.22 s and ≤0.007°; discrepancies explained there).
-
-Two manual browser checks (need Playwright, which is a dev dependency installed by `npm ci`, plus a separate one-time
-browser download, `npx playwright install chromium`; not part of `npm test`): `scripts/e2e-smoke.mjs` (form, search, save,
-phone layout, with screenshots) and `scripts/e2e-basepath.mjs` (sub-path behaviour; see Deployment).
-
-## Deployment and base path
-
-### How the live site is published
+## Publishing
 
 The live copy is the `satellites/` folder of the website repository (`k1kfx.com`, GitHub Pages, published from `main`).
-There are two independent parts, and neither needs a token, a pinned commit or a pull request:
+There are two independent parts. Neither needs a token.
 
-* **The app** is published by hand, rarely. Double-click `publish.bat` in this folder: it runs the tests, builds for
-  `/satellites/` and copies the build into the local website folder's `satellites/` (never anything else, and never
-  `satellites/data/`). Then commit and push the website repository with GitHub Desktop.
-* **The data** (`satellites/data/elements.json` and `status.json`) is refreshed automatically by the website repository's
-  workflow `.github/workflows/update-satellites.yml`, a few times a day and from its "Run workflow" button. It checks out this
-  repository's `main`, runs `npm run refresh-data:strict` and `npm run validate-data`, and commits only those two files.
-  If a download or the validation fails, nothing is committed and the previous data stays published. The page reads the
-  data files on every load, so new data needs no rebuild.
+* **The app** is published by hand, rarely:
+  1. Double-click `publish.bat` in this folder. It runs the tests, builds for `/satellites/`, and copies the build into the
+     local website folder's `satellites/` (never anything else, and never `satellites/data/`). If anything fails it stops
+     and copies nothing.
+  2. In GitHub Desktop, open `k1kfx.com`, click "Pull origin", check that every changed file starts with `satellites/`,
+     then commit and "Push origin".
+  3. Commit and push this repository too, so GitHub has the source that was published.
+* **The data** (`satellites/data/elements.json` and `status.json`) refreshes itself. The website repository's workflow
+  `.github/workflows/update-satellites.yml` runs four times a day, and from its "Run workflow" button in the Actions tab.
+  It checks out this repository's `main`, runs `scripts/refresh-data.ts --strict` and `scripts/validate-data.ts`, and
+  commits only those two files. If a download or the check fails, nothing is committed and the data already on the site
+  stays. The page reads the data files on every load, so new data needs no rebuild.
 
+A separate fox-hunting app lives at `/hunt` on the same site. Nothing here reads, writes or links to it.
 
-> **Not published and not enabled.** This repository has **no GitHub Actions workflows**,
-> Pages is not enabled, and no domain or DNS is configured. A refresh-and-deploy workflow is a
-> later phase that needs your approval.
+## Running it on your own computer
 
-**Deployment prerequisites (recorded, not implemented):** the data files `public/data/*.json` are git-ignored and
-`npm run build` does not fetch them, so a build from a fresh checkout succeeds but deploys a site that shows "Data
-unavailable". A hosted beta therefore needs (1) a scheduled job that runs the refresh and then builds, with the
-data fetched at build time; (2) a build-time check that fails or warns when the data is missing or old, since nothing
-rejects old data today; (3) a rebuild at least daily, because the 72-hour rule means a copy that is not rebuilt shows
-no eligible satellites after about three days; and (4) the `/satellites/` mapping decision below. Verification
-also needs the one-time Playwright browser install above.
-
-**Intended public address:** `https://k1kfx.com/satellites/`. A separate fox-hunting app is
-planned at `/hunt`; nothing in this repository reads, writes or links to it.
-
-**Base path is configurable.** The source stays at the repository root; only the build's URL
-prefix changes:
+Needs [Node.js](https://nodejs.org/) 22.18 or newer. No account or key is involved.
 
 ```bash
-npm run build:satellites          # absolute base /satellites/  (the intended public build)
-VITE_BASE_PATH=/other/ npm run build   # any other absolute base (macOS/Linux; on Windows use: npx vite build --base=/other/)
-npm run build                     # default: relative URLs, works from any sub-directory
+npm ci          # installs exactly the locked dependency versions
+npm start       # downloads current AMSAT data once, then serves http://localhost:5173/
+npm test        # the automated tests (no network needed)
 ```
 
-**Verified** (`scripts/e2e-basepath.mjs`, Chromium; 18 checks each, all passing) for the relative
-build and the `/satellites/` build served under `/satellites/`, and the relative build under
-`/tools/sat/`: the page renders; all assets, the Web Worker and both data files load from under
-the prefix; a search runs and shows results; switching tabs works; reloading keeps working
-(preferences and saved events persist); `/satellites/index.html` works; `/satellites` without the
-slash redirects to `/satellites/` (the test server emulates the redirect GitHub Pages performs);
-**no request ever leaves the prefix**, checked two independent ways (a permanent browser-side log of every
-request, and the test server's own record of out-of-prefix hits), so nothing is read from `/` or `/hunt`;
-and no HTTP, console or page errors. A **negative control** proves the leak detectors can fail (a deliberate
-request to `/hunt/` is caught by both), and a build with the wrong root base (`--base=/`) served under
-`/satellites/` makes the script fail. Reproduce:
+`npm start` downloads data once, at startup; leaving it running does not refresh it. Without data the app shows "Data
+unavailable" and never substitutes anything. In Windows PowerShell, if `npm` is blocked, use `npm.cmd` or Command Prompt.
 
-```bash
-npm run build:satellites
-node scripts/serve-subdir.mjs /satellites/ 4173 &
-node scripts/e2e-basepath.mjs http://localhost:4173 /satellites/    # needs Playwright + `npx playwright install chromium` (once)
-```
+The tests use clearly labelled fixtures: real AMSAT data frozen on 2026-11-12 in `tests/fixtures/` (never used by the app)
+and synthetic geometry in `tests/factory.ts`.
 
-**Not verified (cannot be, until deployment):** how GitHub Pages will actually map
-`/satellites/` to this repository. A GitHub *project* Pages site is normally served at
-`/<repository-name>/` (here that would be `/satellite-planning/`) under the owner's custom
-domain, so reaching exactly `/satellites/` needs a deployment-phase choice, such as renaming the
-repository to `satellites` or publishing `dist/` into a `satellites/` folder of whichever
-repository serves `k1kfx.com`. That decision, and what it does to your existing site, is yours to
-approve in the deployment phase. The build above works for either.
+## Data sources
 
-The data refresh (`npm run refresh-data`) needs no secrets or API keys.
+| Data | Source | Used for |
+|---|---|---|
+| Orbital elements (Keplers) | AMSAT `https://www.amsat.org/tle/current/nasabare.txt` (3-line TLEs, checksum-validated) | Pass prediction |
+| Repeater activity reports | AMSAT Satellite Status API `https://status.amsat.org/api/v1/reports.php` | Eligibility |
+| Frequencies, tones, restrictions | AMSAT "FM Satellites" web page (HTML only) | Hand-maintained catalog |
 
-## Public data sources and refresh
-
-| Data | Source | Format (inspected, not assumed) | Used for |
-|---|---|---|---|
-| Orbital elements | AMSAT `https://www.amsat.org/tle/current/nasabare.txt` | Plain-text 3-line TLEs, validated by checksum | Pass prediction |
-| Repeater activity | AMSAT Satellite Status API `https://status.amsat.org/api/v1/reports.php` (documented, OpenAPI; v1.4) | JSON; values `Heard`, `Telemetry Only`, `Not Heard`, `Crew Active` | Operating status |
-| Frequencies, tones, restrictions | AMSAT "FM Satellites" web page | **Human-readable HTML only, no structured data** | Hand-maintained catalog |
-
-**When data is downloaded (today).** Only the refresh script talks to AMSAT. It runs when you type `npm start`
-(refresh, then start the dev server) or `npm run refresh-data` (`node scripts/refresh-data.ts`); nothing else
-downloads: not `npm run dev`, `build`, `preview` or `test`, and not the browser. The browser only loads the
-already-written `data/elements.json` and `data/status.json` from the site's own address, so pressing Search never
-fetches upstream data. A run makes one request for the orbital elements (retried up to three times on failure) and one
-status request per catalog repeater (17 today), spaced one second apart. There is no workflow, scheduler or cron entry in this repository. The live site's copies are refreshed by a small scheduled
-workflow in the website repository (see "How the live site is published").
-
-**Refresh behavior.** `scripts/refresh-data.ts` downloads and validates the first
-two sources and writes normalized `public/data/elements.json` and
-`status.json` beside the app. The browser reads only those files (no
-cross-origin requests to AMSAT, no CORS dependence). A future workflow is intended to run it on a schedule, so each deployment carries fresh data. Failure policy:
-
-* Orbital elements fail to download or validate → the script exits with an error
-  and writes nothing. (In the planned workflow this keeps the previous
-  deployment live.)
-* Status is **all-or-nothing**: it is written only when every repeater entry downloaded and parsed. If any request
-  fails, `status.json` is not touched; a previous file stays in place with its own (older) download time, and with
-  none every repeater is "unconfirmed". Nothing is guessed, and a timestamp is never advanced by a failed download.
-* A well-formed answer with **no reports** is a success (that repeater stays ineligible and does not block the update);
-  an HTTP error, invalid JSON, a body without the `data` list, or rows that cannot be read are failures.
-* `--strict` (`npm run refresh-data:strict`, for automation): any status failure exits 1 and **nothing** is written.
-  `npm run validate-data` then checks structure, freshness (downloaded within 3 hours), the catalog being complete, no
-  failed entries and at least some reports, before anything is published.
-
-The status API asks clients to identify themselves and poll at most every 5
-minutes; the job sends a descriptive User-Agent and makes one spaced request
-per satellite per run. Report data is © AMSAT, **CC BY 4.0**, and is
-attributed in the app. Callsigns are not stored in the published file
-(reports keep only a time, a value, and an anonymous per-file operator index).
-
-**Updates while a page is open.** Each build writes `version.json` and compiles the same code id into the page. When a search
-starts, the page makes one small request for it; if the published planner has changed it says to reload instead of failing. The data is read once per page load and never refreshes by itself.
-
-**Limitation, stated plainly:** the frequency/restriction catalog is manual. The
-app labels those notes "manual catalog note, not live" with the source page's
-date (2026-10-31) and never presents them as verified live status.
-
-CelesTrak was not used (it was not reachable from the development sandbox); AMSAT is the primary source.
+* Only `scripts/refresh-data.ts` talks to AMSAT. The browser cannot (AMSAT sends no cross-site permission headers) and
+  never tries: it loads the two JSON files from the site's own address. Pressing Search never downloads anything.
+* One run makes one request for the elements and one status request per catalog repeater (17 today), spaced a second
+  apart. The status API asks clients to identify themselves and poll at most every 5 minutes.
+* Failure policy: never fabricate data, and never advance a timestamp on a failed download. With `--strict`, any failure
+  writes nothing at all. A well-formed answer with no reports is a success (that repeater simply stays ineligible).
+* Report data is © AMSAT, **CC BY 4.0**, attributed in the app. Callsigns are not stored in the published file.
+* The frequency/restriction catalog is manual. The app labels those notes "manual catalog note, not live".
+* Each build also writes `version.json`. When a search starts, an open page checks it and asks for a reload if the
+  planner was updated.
 
 ## How passes are counted
 
-* **Full pass (AOS to LOS).** A pass runs from rise to set at 0° elevation (flat horizon, observer at
-  sea level; terrain and obstructions are not modelled). This whole interval is the pass's **envelope**.
-  Cluster bounds, availability fit and the one-station overlap rule all use the full pass.
-* **Minimum elevation selects a pass by its MAXIMUM elevation.** "Include passes that reach at least X°."
-  It does not mean only the part above X° can be operated; no low-elevation cutoff or terrain mask exists.
-  For a sunlight-dependent repeater (AO-91) the elevation must be reached **during a sunlit portion**: a high
-  peak while the repeater may not be used does not qualify the pass.
-* **Permitted operating time** is separate from the pass. It is the whole pass for an unrestricted repeater and
-  only the sunlit portions for a sunlight-dependent one. Eclipsed time is never part of anything labelled
-  operating time. "Time above X°" is shown in Details as information only; it selects and schedules nothing.
-* **Sunlight** is sunlight *at the satellite* (satellite.js `sunPos` +
-  `shadowFraction`), never local daylight. A night-time event can have a lit
-  satellite. Any penumbra counts as not lit. Only AO-91 is flagged
-  sunlight-dependent, because AMSAT's FM page asks for no use in eclipse.
-* **Single-pass mode (Minimum passes = 1).** There is no cluster to build, so every qualifying pass is its own result,
-  sorted as chosen (see **Sorting** below; Date by default). A sunlight-limited pass is ordered by the
-  elevation it can be operated at, not by a peak in shadow. The maximum span is hidden, because it has nothing to
-  constrain. Every other rule is unchanged: selection by peak elevation (including 60° and higher), sunlight, strict
-  eligibility, the satellite selection, and the whole pass lying inside one availability block. Up to 100 passes are
-  shown, and the page says when more exist. With 2 or more minimum passes the cluster behaviour below applies as before.
-* **Cluster.** A cluster is a set of counted passes. Its start is the earliest full-pass AOS and its end the
-  latest full-pass LOS among them (by timestamp), so its duration is the elapsed time between those endpoints,
-  gaps included. Nothing is padded and there are no setup, arrival or departure buffers. The header shows exactly
-  these bounds, to the minute and rounded outward so it never appears to exclude part of a pass, and the exact elapsed
-  time to the nearest minute (which can never exceed the maximum span). Individual pass details keep seconds, and each
-  pass shows its own "Duration".
-* **Maximum span.** The selected 2 / 2.5 / 3 hours is a *limit*, not a required or padded event length:
-  a 20-minute cluster qualifies for a two-hour maximum. The cluster's span (AOS to LOS) must not exceed it.
-* **Availability.** (A **Weekend** shortcut, beside Check all and Uncheck all below the grid, selects Saturday and Sunday in all three periods and clears Monday to Friday; it changes nothing else.) The whole AOS-to-LOS cluster must lie inside one merged availability block (Midday +
-  Evening merge into one block). A pass that begins before or ends after the block does not count, even if
-  its peak is inside. Period boundaries are local wall-clock times in the selected zone, converted per day with
-  Luxon, so DST is handled. A boundary that falls in the repeated hour of a fall-back day takes the earlier instant,
-  resolved explicitly so the result never depends on the date the page is opened. Periods cannot cross midnight.
-* **Search time.** Every search uses the time it is run (one snapshot), however long ago the form was filled in, and
-  the range starts no earlier than that moment: past passes and clusters can never be recommended. A pass that has
-  already begun (AOS before the search time) is not recommended, because a cluster must lie wholly in the available
-  future; one whose AOS is exactly the search time still can.
-* **Overlap rule (one operating station, no setup gap; conservative).** Two passes conflict if their **full
-  AOS-to-LOS envelopes overlap**, even if they overlap only at low elevation. Touching end-to-start is allowed.
-  The planner counts the largest set of pairwise non-overlapping passes in a cluster. Ties go to more total
-  permitted operating time (never including eclipsed time, never double-counted, since counted passes do not
-  overlap), then higher summed peak elevations. Overlapping qualifying passes inside the cluster are shown as
-  *alternatives*, not as independent opportunities. This is deliberately conservative: it can count fewer
-  passes than an operator who works two low-elevation tails could manage.
-* **Sorting.** A compact "Sort by" control beside the result count orders the results. It never changes which results
-  exist or whether a cluster is feasible; it only changes the order. There is no opaque score.
-  * **Date** (default, single passes and clusters): soonest start first.
-  * **Elevation**: highest first. A single pass is scored by the maximum elevation it reaches while operation is
-    permitted (for a sunlight-dependent satellite, the elevation during a sunlit portion). A cluster is scored by the
-    LOWEST of those values among its counted passes ("consistently high": a pair of 80° and 75° passes scores 75°).
-  * **Pass count** (clusters only; not offered for single passes): most counted passes first.
-  * Elevation and Pass count break ties by the earlier start. Remaining ties fall to the other keys, then to the
-    pass identifiers, so the order is total and repeatable.
-  The sort is applied to the **complete** list **before** the display limit (25 clusters, 100 single passes), so the
-  limit always keeps the true first N of the chosen order, and the page says "Showing the first N of M in this order"
-  when it cuts the list. To make that true for every sort, each cluster is built around its **earliest pass** for each
-  possible end time, keeping the frontier of (number of passes, lowest elevation) for that start and end: the biggest set,
-  and each smaller set whose lowest elevation is strictly higher. Start time is never traded away, so an earlier cluster is
-  not dropped because a later one has at least as many passes and as high an elevation (this once hid the earliest cluster
-  from Date order), and a pair of 80° and 75° passes is not hidden behind a three-pass set that contains a 45° pass. The
-  cost grows with passes x ends x distinct elevations, not with every subset of passes. `tests/sorting-oracle.test.ts`
-  compares what each sort puts first with an exhaustive enumeration over 600 random schedules. Clusters with exactly the
-  same counted passes appear once; distinct sets are all kept.
-* **Saved events.** A new event stores the actual cluster interval from its header and is re-checked against
-  that fixed interval (`schema: 2`). A pass that drifts so its full pass crosses the saved edge is flagged,
-  not followed. A new event also stores the satellites that were selected when it was saved, and re-checks consider only
-  those, so an unselected satellite can never appear (older records without a stored selection fall back to the
-  satellites that were originally counted, the conservative choice). Because the saved edges are exact AOS/LOS instants, a pass within 3 seconds of them still counts as
-  inside (recomputing the same pass moves its edges by tens of milliseconds, which is not drift). Events saved by an earlier version (`schema: 1`, the fixed-window model) are never
-  re-interpreted: they are left untouched in storage, not shown or re-checked, and the Saved tab offers an explicit
-  "Remove" for them.
-* **Strict eligibility.** A satellite is considered **only** if its exact FM repeater entry has a
-  "Heard" report in the rolling last 72 hours, measured back from the time of the search (or of the
-  saved-event re-check), with no newer negative report. A satellite without that evidence is left
-  out of planning entirely: never in timelines, pass cards, counts or ranking. It is listed, with
-  the reason, in a collapsed "Satellites not considered" area under the results. Being left out means
-  *this planner lacks the required evidence*, not that the satellite is inactive. There is no
-  "conditional" or "unconfirmed" tier and no option to show unconfirmed passes.
-* **Necessary, not sufficient.** A recent report never overrides the catalog's operating-pattern
-  classification (reviewed per satellite from its cited source) or sunlight:
-  * *Interruptible* (ISS): normally operating, subject to interruptions. ARISS expects the ISS radios to
-    run full time except during educational contacts, spacewalks, dockings and undockings. It qualifies on a
-    recent positive FM report like any normally operating repeater, with no per-pass activation
-    announcement; the pass card shows a "Subject to ISS operations" badge and the explanation and ARISS
-    sources are under Details.
-  * *Activation required* (CAS-3H, IO-86, PO-101, RS95S): scheduled, experimental ("on during testing") or
-    otherwise separately activated, so a recent report does not show it will be on for a predicted pass.
-    Such a satellite would qualify only with confirmation covering that pass. No schedule importer exists
-    yet, so none can be confirmed and they are excluded, with the reason, in the diagnostic list.
-    (CAS-3H is the judgment call: AMSAT gives it "no set schedule" and no published window, so it is
-    classified conservatively here.)
-  * *Sunlight-only* (AO-91): independent of both; an eclipsed part of a pass is never used.
-  The rule shows evidence of operation *now*, not that the repeater will operate at an event weeks ahead.
-* **Selection.** You choose which eligible satellites to consider. ISS, SO-50 and AO-91 start
-  selected; any other eligible repeater starts unchecked. An unselected satellite never appears in or
-  affects results. Your choice is stored exactly as you made it (in this browser): a satellite that is
-  temporarily ineligible stays selected and returns by itself when it qualifies again, and one you
-  unchecked is never re-selected for you.
-* **Freshness.** One muted line under the result count reads "Keplers updated N hours ago · Activity reports updated N
-  hours ago". *Keplers* is the last successful orbital-data download and *Activity reports* the last successful
-  status download; they are kept separate because they can differ. They describe when the data was **retrieved**, not
-  the epoch of any element set nor the time of any individual report, and they are not a live operational check. The
-  warnings are judged from the activity-report time only: after 24 hours "newer reports are not included", after 72
-  hours "cannot qualify a satellite". A failed download never advances a timestamp (the old file keeps its old time).
-  Missing activity reports are called out; the full timestamps stay in the collapsed footer.
-* **Checking vs downloading.** Searching or opening saved events *re-checks the existing reports
-  against the current time* (one time snapshot per search or re-check). It does **not** download new
-  reports; the page shows when the reports were downloaded (by `npm run refresh-data` / `npm start`) and
-  when eligibility was checked.
-* **No results?** The page explains why and suggests what could be relaxed
-  (fewer opportunities, lower elevation, longer event, more availability). Nothing is ever relaxed
-  automatically, and unconfirmed satellites are never suggested as a way to get more windows.
+* **Full pass (AOS to LOS).** A pass runs from rise to set at 0° elevation (flat horizon, sea level, no terrain).
+  Cluster bounds, availability fit and the overlap rule all use the full pass.
+* **Minimum elevation selects a pass by its maximum elevation** ("passes that reach at least X°"). It does not mean only
+  the part above X° is operable. "Time above X°" is information only.
+* **Sunlight** means sunlight *at the satellite*, never local daylight; any penumbra counts as not lit. Only AO-91 is
+  sunlight-dependent (AMSAT asks for no use in eclipse): it must reach the minimum elevation during a sunlit portion,
+  and eclipsed time is never operating time.
+* **Cluster.** Starts at the earliest counted AOS and ends at the latest counted LOS. Nothing is padded; no setup or
+  arrival buffers. The selected 2 / 2.5 / 3 hours is a *maximum* span, so a 20-minute cluster qualifies.
+* **Single-pass mode (Minimum passes = 1).** Every qualifying pass is its own result and the maximum span is hidden.
+* **Availability.** The whole cluster must lie inside one merged availability block (adjacent periods merge). Boundaries
+  are local wall-clock times in the selected zone, so DST is handled. Periods cannot cross midnight.
+* **Search time.** A search uses the moment it runs and never recommends the past or a pass that has already begun.
+* **One operating station (conservative).** Passes whose full AOS-to-LOS envelopes overlap conflict; touching is allowed.
+  The planner counts the largest non-overlapping set. Overlapping passes are shown as alternatives.
+* **Sorting** only orders results; it never changes which exist. Date (default): soonest first. Elevation: highest
+  first, a cluster scored by the *lowest* peak among its counted passes. Pass count (clusters only): most first. The sort
+  is applied to the complete list before the display limit (25 clusters, 100 single passes).
+* **Saved events never move.** An event stores its actual interval and the satellites selected when it was saved;
+  opening the Saved tab re-checks the evidence against that fixed interval and reports what changed. Events saved by a
+  much older version (`schema: 1`) are left untouched in storage and can only be removed by the user.
+* **Add to Google Calendar** (on saved-event cards) makes a prefilled entry: 10 minutes of setup before the first pass,
+  5 minutes after the last, a compact description, no location. It is a static copy and says so.
+* **No results?** The page explains why and suggests what could be relaxed. Nothing is ever relaxed automatically.
 
-### How AMSAT reports are matched to the FM repeater
+### Strict eligibility (deliberate; do not loosen)
 
-AMSAT's status service lists every mode of a satellite as its **own entry**: `ISS_[FM]`,
-`ISS_[Crew]`, `ISS_[SSTV]`, `ISS_[VHF_Digi]`, `AO-123_[FM]`, `AO-123_[SSDV]`, and so on
-(`https://status.amsat.org/api/v1/catalog.php`). The catalog stores, for each repeater, the
-exact FM key (for example `SO-50_[FM]`), and:
+A satellite is considered **only** if its exact FM repeater entry has a "Heard" report in the rolling last 72 hours,
+measured back from the moment of the search or re-check, with no newer negative report. Anything else is left out of
+planning entirely (never in timelines, pass cards, counts or ranking) and is listed, with the reason, in a collapsed
+"Satellites not considered" area. Being left out means *this planner lacks the evidence*, not that the satellite is
+inactive. There is no "unconfirmed" tier and no option to show such passes.
 
-1. the refresh script requests **only that key** (`reports.php?name=SO-50_[FM]`), one request per
-   catalog repeater, so no other mode is ever downloaded;
-2. as a second line of defence, ingestion **rejects any returned row whose own `name` is not that
-   exact key** (or whose NORAD ID contradicts the catalog; AMSAT has no ID for CAS-3H, so a
-   missing ID is accepted) and records the rejection;
-3. the classifier reads only that key's reports, so reports filed under another mode of the same
-   satellite cannot influence it.
+A recent report is necessary, not sufficient. The catalog classifies each repeater from its own cited source:
 
-Checked against the live API on 2026-11-12: all 13 FM entries that had reports returned rows named
-exactly their own key and matching NORAD IDs; `tests/ingest.test.ts` and `tests/eligibility.test.ts`
-prove that rows or whole responses from other modes (SSTV, digipeater, crew) are rejected or ignored.
+* *Interruptible* (ISS): normally on, sometimes switched off. Qualifies on a recent report; badge "Subject to ISS operations".
+* *Activation required* (CAS-3H, IO-86, PO-101, RS95S): scheduled, experimental or commanded. Excluded until an
+  activation-confirmation source exists.
+* *Sunlight-only* (AO-91): independent of both.
 
-Within the FM entry, report values are interpreted like this:
+AMSAT lists each mode of a satellite as its own entry (`ISS_[FM]`, `ISS_[SSTV]`, ...). The refresh requests only the exact
+FM key, ingestion rejects any row with a different name, and the classifier reads only that key. Report values:
 
-| AMSAT value | Meaning here | Can it make the repeater count? |
+| AMSAT value | Meaning here | Can make the repeater count? |
 |---|---|---|
-| Heard | Someone worked/heard the **FM repeater** | Yes, if recent and not contradicted by a newer negative |
-| Telemetry Only | Only the **beacon/telemetry** was heard, so the repeater is not shown to work | No (counted as a negative) |
-| Not Heard | Nothing received | No (counted as a negative) |
-| Crew Active | ISS crew voice (belongs to the `ISS_[Crew]` entry) | No: ignored |
+| Heard | Someone worked or heard the FM repeater | Yes, if recent and not followed by a negative |
+| Telemetry Only | Only the beacon was heard | No (a negative) |
+| Not Heard | Nothing received | No (a negative) |
+| Crew Active | ISS crew voice | No (ignored) |
 
-So a heard beacon, or activity in any other mode, **cannot** establish FM repeater availability.
-Limitation: these are volunteer reports, and the software cannot tell whether an operator filed a
-report under the correct mode.
+Resulting labels: **Recently reported active** (eligible); **Mixed reports**, **Not heard (unconfirmed)**, **Confirmed
+unavailable** (2+ negatives from 2+ operators), **No recent reports**, **Activation window required**, **Status data
+unavailable** (all left out). These are volunteer reports; "confirmed" means repeatedly reported, not verified by AMSAT.
 
-### What each result label means (status vocabulary)
+Selection: ISS, SO-50 and AO-91 start selected when eligible. The choice is stored exactly as made: a temporarily
+ineligible satellite stays selected, and an unchecked one is never re-selected.
 
-| Label (diagnostic detail) | When | Eligible for planning? |
-|---|---|---|
-| **Recently reported active** | at least one "Heard" in the last 72 h and no newer negative | **Yes** (if selected) |
-| **Mixed reports** | "Heard" reports **and** a newer negative (not heard / beacon only) | No: left out |
-| **Not heard (unconfirmed)** | negative report(s) only, but fewer than 2 reports or fewer than 2 operators | No: left out |
-| **Confirmed unavailable** | at least 2 negative reports from at least 2 operators, no "Heard", all in the last 72 h | No: left out |
-| **No recent reports** | no reports in 72 h | No: left out |
-| **Activation window required (not confirmed)** | catalog classification `activation-required`, whatever the reports say | No: left out (until a confirmation source exists) |
-| **Status data unavailable** | the status file could not be loaded | No: left out ("eligibility cannot be established") |
+Freshness line: "Keplers updated ... · Activity reports updated ..." is when each file was last successfully
+*downloaded*, not an element epoch or a report time. The page warns when the activity reports are over 24 hours old, and
+after 72 hours no satellite can qualify.
 
-The classification is unchanged; only its consequence is. Every row except the first is left out
-of planning and shown only in the collapsed diagnostic list, worded as missing evidence, for example
-"TEVEL2-1: no qualifying FM report in the last 72 hours." "Confirmed" here means *repeatedly reported by
-several operators*, not verified by AMSAT.
+## Policies (in `src/domain/policy.ts`)
 
-## Policies (tunable assumptions)
+| Policy | Value |
+|---|---|
+| Status freshness window | 72 h back from the search |
+| "Confirmed unavailable" | at least 2 negative reports from at least 2 operators, no positive |
+| Orbital-elements age limit | 30 days (older sets are skipped and named in the results) |
+| Shadow rule | shadow fraction ≥ 0.01 = not sunlit |
+| Elevation input | 5° to 85° (default 40°) |
+| Search span | default 28 days, at most 42 |
+| Calendar entry buffers | 10 min before, 5 min after, 15 min minimum |
 
-These are this app's **choices**, not guarantees from AMSAT or satellite
-owners. All live in `src/domain/policy.ts`.
-
-| Policy | Value | Effect |
-|---|---|---|
-| Status freshness window | 72 h, back from the time of the search | Only reports within it can make a satellite eligible |
-| "Confirmed unavailable" | ≥2 negative reports from ≥2 operators, no positive | Left out (one negative = just "not heard (unconfirmed)", also left out) |
-| "Mixed reports" | newest report negative after a positive | Left out |
-| Default selection | ISS, SO-50, AO-91 (when eligible) | Other eligible satellites start unchecked |
-| Orbital-elements age limit | 30 days | Older sets are skipped and named in the results |
-| Prediction labels | >7 d "tentative", >28 d "provisional" (days past elements epoch) | Wording only, not an accuracy figure |
-| Shadow rule | shadow fraction ≥ 0.01 = not sunlit | Conservative for eclipse-restricted repeaters |
-| Elevation input | 5°–85° | |
-| Search span | ≤ 42 days | |
-
-A consequence worth knowing: the status policy is deliberately strict. Few
-repeaters have a recent "Heard" report at any moment, so with ≥3 opportunities
-required you may see empty results. Relaxing to 2 is a decision left to you; the
-planner never counts unconfirmed satellites. Status is also a snapshot of *now*; for an
-event weeks away it is the best available evidence, not a promise.
+These are this app's choices, not guarantees from AMSAT or satellite owners. The status rule is strict on purpose, so
+with three passes required you may see empty results.
 
 ## Catalog maintenance
 
-`src/catalog/catalog.ts` has three separate layers:
-`SATELLITES` (identity by stable NORAD ID), `FM_REPEATERS` (frequencies, CTCSS
-tones, AMSAT status key) and `RESTRICTIONS` (`sunlight-only` / `interruptible` /
-`activation-required` / notes, each with source and date). To add a satellite:
+`src/catalog/catalog.ts` has three layers: `SATELLITES` (identity by NORAD ID), `FM_REPEATERS` (frequencies, CTCSS tones,
+AMSAT status key) and `RESTRICTIONS` (each with source and date). To add a satellite:
 
-1. Add it to `SATELLITES` (NORAD ID, name, aliases).
-2. Add its `fm(...)` row with uplink/downlink MHz (bands are derived and must
-   be 2 m/70 cm cross-band; the code throws otherwise).
-3. Set `amsatStatusKey` to its name in AMSAT's status catalog
-   (`https://status.amsat.org/api/v1/catalog.php`, for example `SO-50_[FM]`).
-4. Add any `RESTRICTIONS` rows with the source page and its date. Use
-   `sunlight-only` only if a source says so. Classify the operating pattern from that satellite's own
-   source text: `interruptible` only for a normally operating repeater that is sometimes switched off;
-   `activation-required` for scheduled, experimental or commanded activation (it will be excluded
-   until a confirmation source exists). When unsure, use `activation-required`, the conservative choice.
-5. Update `CATALOG_REVIEWED_AT` / `CATALOG_SOURCE_DATE`, run `npm test`.
+1. Add it to `SATELLITES`.
+2. Add its `fm(...)` row with uplink/downlink MHz (must be 2 m/70 cm cross-band; the code throws otherwise).
+3. Set `amsatStatusKey` to its exact name in `https://status.amsat.org/api/v1/catalog.php` (for example `SO-50_[FM]`).
+4. Add any `RESTRICTIONS` rows with the source and its date. Use `sunlight-only` only if a source says so. When unsure of
+   the operating pattern, use `activation-required`, the conservative choice.
+5. Update `CATALOG_SOURCE_DATE` and run `npm test`.
 
-The refresh script and the app pick it up automatically. Re-check AMSAT's FM page
-periodically; the catalog does not update itself.
+Re-check AMSAT's FM page now and then; the catalog does not update itself.
 
-## Independent review (what it found and what was done)
+## Limits worth knowing
 
-A separate reviewer agent, given only the requirements and the code, read the cluster finder,
-sunlight eligibility, time-zone handling and base-path code and probed them with randomized
-checks. **A review by an AI, even a clean one, is not proof of correctness**; it found real defects
-the original tests had missed, which is the point of asking.
-
-Fixed (each first reproduced by a failing test):
-* (Historical: padded windows were later removed in favour of exact full-pass clusters.)
-* **Window could start up to a second before its availability block** (a rounding fallback in
-  `tidyStart` could leave `[lo, hi]`; the tidy window was never re-checked against the block).
-  Clamped, and a tidy window is now accepted only if it stays inside the block.
-* **False one-hour gap in zones whose clocks change at midnight** (e.g. America/Havana): the end of
-  one day and the start of the next were resolved differently. Both now use the same conversion.
-* **A period inside a spring-forward gap lost real time** (02:30-03:30 became empty). Nonexistent
-  times now snap to the instant the clocks jump (03:00-03:30). The code comment had also claimed this.
-* **Base-path check was weaker than it read** (it discarded requests, used "some" for assets, and its
-  `/hunt` check could not fail). Rewritten: permanent request log, every asset checked, server-side
-  out-of-prefix log, and a negative control (see Deployment).
-* **FM-entry guard was optional** in `parseStatusReports`; it is now a required argument. The test
-  server no longer crashes on a malformed URL escape.
-
-Reviewed and found consistent (by the reviewer's own probes, not independently re-run by me except
-where noted): the non-overlapping selection against a subset brute force on 3,000 random cases; the
-window search against an exhaustive grid on 400 random cases; sunlight segments against a 0.5 s brute
-force on 5,028 real passes (worst boundary error 12 ms); availability expansion against Luxon in 18 zones.
-Not verifiable by the reviewer, and so checked by me: the Playwright base-path run and the rendering of
-the status labels in a browser.
-
-Accepted, not changed: eclipse boundaries are sampled every 5 s (documented above); a stale
-`public/data/status.json` written by an older version is trusted as written (regenerate it with
-`npm start`); with the default relative base, opening the app as `/satellites` *without* the slash
-depends on the host's redirect (GitHub Pages does it), whereas `npm run build:satellites` does not.
-
-## Long-range prediction limitations
-
-Orbits are propagated with SGP4 from a single set of elements. The further a
-time is from the elements' epoch, the more the real satellite drifts from the
-prediction (atmospheric drag on low satellites and manoeuvres are the main
-reasons). This app **does not claim second-level accuracy weeks ahead and
-computes no confidence intervals**. Instead it:
-
-* shows three separate timestamps: when data was **downloaded**, the
-  **epoch** of the elements, and when predictions were **generated**;
-* labels events more than 7 days past the epoch *tentative* and more than 28
-  *provisional*;
-* recalculates everything when refreshed data loads, and re-checks **saved
-  events** when you open them (the saved time never moves; you are told what
-  changed and warned if it drops below your minimum).
-
-Treat a date chosen 3–4 weeks ahead as a good *choice of day*, then re-check
-in the days before. Skyfield cross-checking verifies the implementation, not
-real-world drift (see `docs/VALIDATION.md`).
+* Predictions use SGP4 from one set of elements. The further ahead, the more a real satellite drifts. The app claims no
+  second-level accuracy weeks ahead and computes no confidence intervals. Treat a date three or four weeks out as a good
+  *choice of day*, then re-check in the days before.
+* Activity reports show evidence of operation *now*, not a promise for an event weeks away.
+* Observer height is 0 and there is no terrain mask. Eclipse boundaries are sampled every 5 seconds.
 
 ## Privacy
 
-Your location, availability and saved events live only in this browser's
-`localStorage`. The location is **never guessed**: it is empty until you type
-it or press "Use my current location". Nothing is sent to any server. There
-are no accounts, analytics, or cookies.
-
-## Deferred features
-
-Not implemented (by design for this release): SSTV; linear transponders;
-packet, APRS, telemetry-only and beacon-only activities; mutual visibility /
-coordination with another station; live tracking, globes, ground tracks;
-Doppler tuning; radio or rotator control; QSO logging; setup-gap settings;
-notifications, email and accounts; date-specific availability blocks,
-recurrence rules, multiple named availability profiles, family calendars and
-one-off exceptions. Observer altitude and horizon masks are also not modelled.
-Availability is already normalized into absolute intervals, so most of the
-availability features can be added without touching the cluster finder.
+Location, availability and saved events live only in the visitor's own browser (`localStorage`). The location is never
+guessed: it is empty until typed or "Use my current location" is pressed. Nothing is sent to any server. No accounts,
+analytics or cookies.
 
 ## Project layout
 
 ```
+publish.bat      test, build and copy the app into the local website folder
 src/
-  domain/        types, interval algebra, policy constants
+  domain/        types, interval helpers, policy constants
   catalog/       satellite identity · FM repeater config · restrictions
-  data/          ingest.ts (pure parsing/validation) · load.ts (browser fetch)
-  orbit/         predict.ts (satellite.js) · worker + client · horizon labels
-  eligibility/   status.ts (activity reports → state) · assess.ts (pass + sunlight)
+  data/          parsing and validation · browser loading · update check
+  orbit/         pass prediction (satellite.js) in a Web Worker
+  eligibility/   activity reports → status · pass + sunlight assessment
   availability/  weekly grid → absolute intervals (Luxon)
-  cluster/       full-pass non-overlap selection, cluster search, duplicate removal, ranking
-  saved/         snapshots (schema 2), fixed-interval re-check, change comparison
-  planner.ts     orchestration + "no results" diagnosis
+  cluster/       non-overlap selection, cluster search, sorting
+  saved/         saved events and their re-check
+  export/        calendar entry text and the Google Calendar link
+  planner.ts     orchestration and "no results" diagnosis
   ui/            React components and styles
-scripts/         refresh-data.ts · smoke.ts · serve-subdir.mjs · e2e-smoke.mjs
-validation/      independent Skyfield comparison
-tests/           test suite + labelled fixtures
-CLAUDE.md          working agreements for contributors
+scripts/         refresh-data.ts · validate-data.ts
+tests/           test suite and labelled fixtures
+CLAUDE.md        working agreements for AI assistants
 ```

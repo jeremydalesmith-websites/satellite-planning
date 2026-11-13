@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { ACTIVITIES } from '../catalog/catalog.ts';
 import type { LoadedData } from '../planner.ts';
 import { buildGoogleCalendarUrl } from '../export/googleCalendar.ts';
-import { InvalidCalendarDataError, lostEligibilityAlerts } from '../export/ics.ts';
+import { InvalidCalendarDataError, lostEligibilityAlerts } from '../export/calendar.ts';
 import { recheckSavedEvent } from '../saved/recheck.ts';
 import type { SavedEvent } from '../saved/saved.ts';
 import { PassCard } from './PassCard.tsx';

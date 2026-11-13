@@ -14,7 +14,6 @@ function fmt(tz: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat 
 export const fmtTime = (ms: Ms, tz: string) => fmt(tz, { hour: 'numeric', minute: '2-digit' }).format(ms);
 export const fmtTimeSec = (ms: Ms, tz: string) => fmt(tz, { hour: 'numeric', minute: '2-digit', second: '2-digit' }).format(ms);
 export const fmtDay = (ms: Ms, tz: string) => fmt(tz, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(ms);
-export const fmtDayShort = (ms: Ms, tz: string) => fmt(tz, { weekday: 'short', month: 'short', day: 'numeric' }).format(ms);
 export const fmtDateTime = (ms: Ms, tz: string) => fmt(tz, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(ms);
 export const tzAbbrev = (ms: Ms, tz: string) =>
   fmt(tz, { timeZoneName: 'short' }).formatToParts(ms).find((p) => p.type === 'timeZoneName')?.value ?? tz;

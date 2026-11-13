@@ -53,10 +53,6 @@ export function statusFileProblem(x: unknown): string | null {
   return null;
 }
 
-export function isStatusFile(x: unknown): x is StatusFile {
-  return statusFileProblem(x) === null;
-}
-
 export async function loadData(): Promise<LoadResult> {
   let elements: ElementsFile;
   try {

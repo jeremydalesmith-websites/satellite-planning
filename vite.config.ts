@@ -39,7 +39,7 @@ export default defineConfig(({ command }) => ({
     },
   ],
   worker: { format: 'es' },
-  build: { target: 'es2022', sourcemap: true },
+  build: { target: 'es2022' },
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],

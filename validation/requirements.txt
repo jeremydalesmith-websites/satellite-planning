@@ -1,4 +1,0 @@
-# Independent predictor used by validation/compare_skyfield.py (not needed to run the app).
-skyfield==1.55
-# Bundles a genuine JPL de421.bsp ephemeris (skyfield_data/data/de421.bsp inside the wheel).
-skyfield-data==7.0.0

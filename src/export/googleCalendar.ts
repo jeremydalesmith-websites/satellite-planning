@@ -3,13 +3,13 @@
  * nothing itself (the page shows the result as an ordinary link).
  *
  * It reuses the approved calendar pieces unchanged, so the title, the 10-minute setup and 5-minute post-pass buffers, the compact
- * plain-text description and all data validation are exactly what the .ics builder uses. The link only carries them to Google's
+ * plain-text description and all data validation are defined once, in calendar.ts. The link only carries them to Google's
  * event-template address:
  *
  *   https://calendar.google.com/calendar/render?action=TEMPLATE&text=<title>&dates=<start>/<end>&ctz=<zone>&details=<description>
  *
  *   text    the title (calendarTitle)
- *   dates   start/end in UTC ("Z"), the same instants as the .ics DTSTART/DTEND (setup start to buffered end)
+ *   dates   start/end in UTC ("Z") (setup start to buffered end)
  *   ctz     the event's saved planning zone, so the time shows in the zone the description names
  *   details the compact description as PLAIN TEXT: line breaks are encoded newlines (no HTML)
  *
@@ -17,8 +17,8 @@
  * person's own calendar: Google keeps no link back to the planner, so it never updates when predictions change.
  */
 import type { Ms } from '../domain/types.ts';
-import { calendarDescription, calendarTimes, calendarTitle } from './ics.ts';
-import type { CalendarExportOptions, CalendarSource } from './ics.ts';
+import { calendarDescription, calendarTimes, calendarTitle } from './calendar.ts';
+import type { CalendarExportOptions, CalendarSource } from './calendar.ts';
 
 export const GOOGLE_CALENDAR_TEMPLATE_URL = 'https://calendar.google.com/calendar/render';
 

@@ -81,18 +81,15 @@ npm test             # vitest; needs no network (uses frozen fixtures)
 npm run build        # typecheck + production build into dist/ (relative base)
 npm run build:satellites   # same, with the intended public base /satellites/
 ```
-Base-path check (needs Playwright: a dev dependency installed by `npm ci`, plus the one-time browser download
-`npx playwright install chromium`): build, `node scripts/serve-subdir.mjs /satellites/ 4173 &`, then
-`node scripts/e2e-basepath.mjs http://localhost:4173 /satellites/` (all 18 checks must pass).
 For a working preview with real data: `npm start` (downloads AMSAT data, then
 serves http://localhost:5173/). Behind a proxy prefix with `NODE_USE_ENV_PROXY=1`.
-Independent prediction validation: see `docs/VALIDATION.md` (needs Python).
+Keep the project slim: remove code, scripts and dependencies that nothing uses, and do not add tooling the owner did not ask for.
 
 ## Git and review workflow
 * **Keep publishing simple.** Work on `main` in this folder; the owner commits and pushes with GitHub Desktop. There is
   no pinned commit, no deploy token and no pull-request step. The app is published with `publish.bat` (tests, build, copy into
   the local website folder's `satellites/`); the data is refreshed by one small scheduled workflow in the website repository
-  (see README, "How the live site is published"). Do not add machinery to this without the owner asking for it.
+  (see README, "Publishing"). Do not add machinery to this without the owner asking for it.
 * **Do not push, publish, run or change workflows, delete branches, or change DNS/domain settings without the owner's
   explicit approval** for that specific action.
 * The owner's website repository (`k1kfx.com`) is separate: only its `satellites/` folder and its one data workflow belong
@@ -109,7 +106,7 @@ Independent prediction validation: see `docs/VALIDATION.md` (needs Python).
 * The results line "Keplers updated ... · Activity reports updated ..." is retrieval time (successful download), not an
   element epoch or a report time, and never implies a live check. A failed download must never advance a timestamp.
 
-## Calendar export (`src/export/ics.ts` builds the entry text and times; `src/export/googleCalendar.ts` makes the "Add to Google Calendar" link shown on saved-event cards)
+## Calendar export (`src/export/calendar.ts` builds the entry title, times and description; `src/export/googleCalendar.ts` makes the "Add to Google Calendar" link shown on saved-event cards; there is no .ics file download)
 * The export is the SAVED plan exactly as saved (a static snapshot). It never recomputes or "fills in" details from current
   predictions; details an older saved event did not store are covered by one concise note. It never says or implies that a
   calendar entry updates automatically: the description ends with "Static calendar copy—recheck times and status:" and the
@@ -119,10 +116,8 @@ Independent prediction validation: see `docs/VALIDATION.md` (needs Python).
   a 15-minute minimum. These buffers exist ONLY in the exported entry; they never feed a prediction, a cluster, or a saved
   event's stored interval (the "no setup/arrival buffers" rule above still holds for planning). Titles use the full-pass
   maximum elevation and the AOS-to-LOS duration, without buffers.
-* No coordinates, callsigns, alarms or network access in the export. DTSTART/DTEND are written in UTC; the description shows
-  times in the saved planning zone, named once. Re-import behavior is not promised: in ONE Google Calendar test, importing an
-  identical file again did not create a duplicate (an observation about identical files in one calendar, not evidence that
-  changed entries are replaced or that other calendars behave the same).
+* No coordinates, callsigns, alarms or network access in the export. The link carries start and end in UTC; the description
+  shows times in the saved planning zone, named once. The entry is a one-time copy: Google keeps no link back to the planner.
 
 ## Privacy
 Treat the owner's identity and location as private. Do not put personal details

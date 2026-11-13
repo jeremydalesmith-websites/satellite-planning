@@ -42,8 +42,6 @@ export const SOURCES = {
   },
 } as const satisfies Record<string, SourceRef>;
 
-/** Date a person last compared this file with the sources above (ISO date). */
-export const CATALOG_REVIEWED_AT = '2026-11-12';
 /** Date of the AMSAT FM page the frequencies/notes were transcribed from. */
 export const CATALOG_SOURCE_DATE = '2026-10-31';
 

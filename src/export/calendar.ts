@@ -1,21 +1,18 @@
 /**
- * Calendar (.ics) export of a SAVED event: a pure builder with no network access and no storage access.
+ * Calendar entry for a SAVED event: its title, start and end times, and description. A pure builder with no network access and
+ * no storage access. The "Add to Google Calendar" link (googleCalendar.ts) carries these to Google.
  *
- * What it exports is the saved plan exactly as saved. It never recomputes a prediction and never "fills in" a missing detail
+ * What it describes is the saved plan exactly as saved. It never recomputes a prediction and never "fills in" a missing detail
  * from current data. The calendar entry is a STATIC SNAPSHOT: nothing updates it, and the description's last sentence says it
  * is a static copy to re-check in the planner.
  *
  * Calendar times: start = first saved AOS minus the setup buffer (rounded down to a whole second); end = last saved LOS plus
- * the post-pass buffer (rounded up to a whole second), and never shorter than the minimum length. All DTSTART/DTEND values
- * are written in UTC, so they are unambiguous without a time-zone definition. The description is deliberately COMPACT: the
- * date and the event's saved planning zone are stated once ("All times CST") and times carry no zone or UTC after that; there
- * is one short block per pass, one buffer sentence, brief warnings once, and the static-copy sentence with the planner link.
- * Longer explanations belong in the planner, not in the calendar entry.
+ * the post-pass buffer (rounded up to a whole second), and never shorter than the minimum length. The description is
+ * deliberately COMPACT: the date and the event's saved planning zone are stated once ("All times CST") and times carry no zone
+ * or UTC after that; there is one short block per pass, one buffer sentence, brief warnings once, and the static-copy sentence
+ * with the planner link. Longer explanations belong in the planner, not in the calendar entry.
  *
- * Deliberately NOT included: observer coordinates, callsigns, alarms, attendees, a location. The VEVENT has a stable UID and
- * SEQUENCE 0. OBSERVED, in one Google Calendar test by the owner: importing the identical file a second time did not create a
- * duplicate. That is ONE observation about identical files in ONE calendar: it is not evidence that Google (or any other
- * calendar) replaces an entry whose content changed, or that other calendars behave the same, and nothing here promises it.
+ * Deliberately NOT included: observer coordinates, callsigns, alarms, attendees, a location.
  */
 import { ACTIVITIES } from '../catalog/catalog.ts';
 import type { FmActivity } from '../catalog/catalog.ts';
@@ -53,9 +50,7 @@ export interface CalendarTimes {
   extendedToMinimum: boolean;
 }
 
-export const ICS_MIME = 'text/calendar;charset=utf-8';
 const MIN = 60_000;
-const CRLF = '\r\n';
 
 /** Thrown for saved data that cannot make a trustworthy calendar entry. Nothing is ever exported from such data. */
 export class InvalidCalendarDataError extends Error {
@@ -295,91 +290,14 @@ export function calendarDescription(source: CalendarSource, exportedAtMs: Ms): s
   return out.join('\n');
 }
 
-/* ------------------------------------------------------------------ .ics */
-
-/** RFC 5545 TEXT escaping: backslash, semicolon, comma and line breaks. */
-export function escapeText(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r\n|\r|\n/g, '\\n');
-}
-
-/** Fold a content line to at most 75 octets per physical line (continuations start with one space), never splitting a UTF-8 character. */
-export function foldLine(line: string): string {
-  const encoder = new TextEncoder();
-  const parts: string[] = [];
-  let current = '';
-  let bytes = 0;
-  for (const ch of line) {
-    const size = encoder.encode(ch).length;
-    if (bytes + size > 75) {
-      parts.push(current);
-      current = ' ';
-      bytes = 1;
-    }
-    current += ch;
-    bytes += size;
-  }
-  parts.push(current);
-  return parts.join(CRLF);
-}
-
-const icsTime = (ms: Ms) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
-const safe = (s: string) => s.replace(/°/g, 'deg').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
-
-export function calendarUid(id: string): string {
-  return `${safe(id) || 'event'}@k1kfx.com`;
-}
-
-export interface CalendarExport {
-  filename: string;
-  mimeType: typeof ICS_MIME;
-  content: string;
-  title: string;
-  startMs: Ms;
-  endMs: Ms;
-}
-
 /**
- * Labels for SAMPLE files only (a test file a person imports into a throwaway calendar). The app never passes these: a real
- * export has neither.
+ * Labels for SAMPLE links only (a test entry a person adds to a throwaway calendar). The app never passes these.
  */
 export interface CalendarExportOptions {
   /** Put in front of the title, e.g. "SAMPLE — ". */
   titlePrefix?: string;
   /** Put as the first lines of the description. */
   descriptionPrefix?: string;
-}
-
-/** Build the .ics text (CRLF line endings, folded lines) for a saved event, exactly as saved. Throws InvalidCalendarDataError for broken data. */
-export function buildCalendarExport(source: CalendarSource, exportedAtMs: Ms, options: CalendarExportOptions = {}): CalendarExport {
-  validateContext(source, exportedAtMs);
-  const passes = inTimeOrder(source.original.counted);
-  const t = calendarTimes(passes);
-  const plainTitle = calendarTitle(passes);
-  const title = `${options.titlePrefix ?? ''}${plainTitle}`;
-  const description = `${options.descriptionPrefix ? `${options.descriptionPrefix}\n\n` : ''}${calendarDescription(source, exportedAtMs)}`;
-  const lines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//K1KFX//Satellite Pass Planner//EN',
-    'CALSCALE:GREGORIAN',
-    'BEGIN:VEVENT',
-    `UID:${calendarUid(source.id)}`,
-    `DTSTAMP:${icsTime(Math.floor(exportedAtMs / 1000) * 1000)}`,
-    'SEQUENCE:0',
-    `DTSTART:${icsTime(t.startMs)}`,
-    `DTEND:${icsTime(t.endMs)}`,
-    `SUMMARY:${escapeText(title)}`,
-    `DESCRIPTION:${escapeText(description)}`,
-    `URL:${PLANNER_URL}`,
-    'TRANSP:OPAQUE',
-    'END:VEVENT',
-    'END:VCALENDAR',
-  ];
-  const stamp = new Intl.DateTimeFormat('en-CA', { timeZone: source.timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-    .formatToParts(t.firstAosMs)
-    .reduce<Record<string, string>>((acc, p) => ({ ...acc, [p.type]: p.value }), {});
-  const filename = `${safe(passes.length === 1 ? plainTitle : `${passes.length}-passes`)}-${stamp.year}${stamp.month}${stamp.day}-${stamp.hour}${stamp.minute}.ics`;
-  return { filename, mimeType: ICS_MIME, content: lines.map(foldLine).join(CRLF) + CRLF, title, startMs: t.startMs, endMs: t.endMs };
 }
 
 /**

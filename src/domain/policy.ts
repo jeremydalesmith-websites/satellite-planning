@@ -47,13 +47,6 @@ export const UNAVAILABLE_MIN_CALLSIGNS = 2;
 export const MAX_ELEMENT_AGE_DAYS = 30;
 
 /**
- * Prediction-horizon labels, measured from the orbital-elements epoch to the
- * time being predicted. These are wording tiers, NOT accuracy figures.
- */
-export const TENTATIVE_AFTER_DAYS = 7;
-export const PROVISIONAL_AFTER_DAYS = 28;
-
-/**
  * Sunlight: the satellite counts as sunlit only when none of the Sun's disc is
  * covered by Earth (shadow fraction below this). Penumbra therefore counts as
  * NOT sunlit for sunlight-dependent repeaters (conservative; lasts seconds).

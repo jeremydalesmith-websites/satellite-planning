@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GOOGLE_CALENDAR_TEMPLATE_URL, buildGoogleCalendarUrl } from '../src/export/googleCalendar.ts';
-import { InvalidCalendarDataError, buildCalendarExport, calendarDescription, calendarTitle } from '../src/export/ics.ts';
-import type { CalendarPass, CalendarSource } from '../src/export/ics.ts';
+import { InvalidCalendarDataError, calendarDescription, calendarTitle } from '../src/export/calendar.ts';
+import type { CalendarPass, CalendarSource } from '../src/export/calendar.ts';
 
 /**
  * "Add to Google Calendar": a prefilled event link for a SAVED event. It must carry exactly what the approved calendar builder
@@ -45,7 +45,6 @@ const parts = (url: string) => {
   const u = new URL(url);
   return { u, keys: [...u.searchParams.keys()], text: u.searchParams.get('text')!, dates: u.searchParams.get('dates')!, ctz: u.searchParams.get('ctz')!, details: u.searchParams.get('details')! };
 };
-const prop = (ics: string, name: string) => ics.replace(/\r\n[ \t]/g, '').split('\r\n').find((l) => l.startsWith(`${name}:`))?.slice(name.length + 1);
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -66,10 +65,8 @@ describe('the link', () => {
     expect(p.text).toBe('ISS 75° 11m');
     expect(p.text).toBe(calendarTitle([iss()]));
   });
-  it('dates are UTC, start to end, with the 10-minute setup before and 5 minutes after: the same instants as the .ics file', () => {
+  it('dates are UTC, start to end, with the 10-minute setup before and 5 minutes after', () => {
     expect(p.dates).toBe('20261114T232204Z/20261114T234751Z');
-    const ics = buildCalendarExport(source([iss()]), BEFORE).content;
-    expect(p.dates).toBe(`${prop(ics, 'DTSTART')}/${prop(ics, 'DTEND')}`);
     expect(url).toContain('&dates=20261114T232204Z/20261114T234751Z&'); // the slash is literal, as in Google's own examples
   });
   it('ctz is the saved planning zone', () => {
@@ -187,7 +184,7 @@ describe('a pure snapshot', () => {
   it('imports only the approved calendar builder: no storage, network or page access', () => {
     const src = readFileSync('src/export/googleCalendar.ts', 'utf8');
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    expect([...new Set([...code.matchAll(/from '([^']+)'/g)].map((m) => m[1]))].sort()).toEqual(['../domain/types.ts', './ics.ts']);
+    expect([...new Set([...code.matchAll(/from '([^']+)'/g)].map((m) => m[1]))].sort()).toEqual(['../domain/types.ts', './calendar.ts']);
     for (const banned of ['fetch(', 'XMLHttpRequest', 'localStorage', 'sessionStorage', 'navigator.', 'document.', 'window.', 'globalThis']) expect(code).not.toContain(banned);
   });
   it('the link is identical in processes whose system time zone really differs', () => {

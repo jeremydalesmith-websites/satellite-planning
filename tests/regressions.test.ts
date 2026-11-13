@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { emptyAvailability, expandAvailability } from '../src/availability/availability.ts';
 import type { AvailabilitySettings } from '../src/availability/availability.ts';
-import { isStatusFile, statusFileProblem } from '../src/data/load.ts';
+import { statusFileProblem } from '../src/data/load.ts';
 import type { StatusFile } from '../src/data/ingest.ts';
 import { classifyStatus } from '../src/eligibility/status.ts';
 import { predictAll } from '../src/orbit/predict.ts';
@@ -203,15 +203,14 @@ describe('finding 6: the displayed duration is computed from exact timestamps, d
 
 describe('finding 7: malformed status entries fail closed instead of crashing', () => {
   const base = { schema: 1, source: { name: 't', url: 'u', license: 'x' }, downloadedAt: new Date(T0).toISOString() };
-  it('statusFileProblem names what is wrong, and isStatusFile rejects it', () => {
+  it('statusFileProblem names what is wrong and accepts a well-formed file', () => {
     expect(statusFileProblem({ ...base, satellites: { 'SO-50_[FM]': { reports: [] } } })).toBeNull();
     expect(statusFileProblem({ ...base, satellites: { 'SO-50_[FM]': {} } })).toMatch(/SO-50_\[FM\].*reports/);
     expect(statusFileProblem({ ...base, satellites: { 'SO-50_[FM]': { reports: 'x' } } })).toMatch(/SO-50_\[FM\]/);
     expect(statusFileProblem({ ...base, satellites: { 'SO-50_[FM]': { reports: [[1, 'Z', 0]] } } })).toMatch(/SO-50_\[FM\]/);
     expect(statusFileProblem({ ...base, satellites: { 'SO-50_[FM]': { reports: [['a', 'H', 0]] } } })).toMatch(/SO-50_\[FM\]/);
     expect(statusFileProblem({ ...base, satellites: { 'SO-50_[FM]': null } })).toMatch(/SO-50_\[FM\]/);
-    expect(isStatusFile({ ...base, satellites: { 'SO-50_[FM]': {} } })).toBe(false);
-    expect(isStatusFile({ ...base, satellites: { 'SO-50_[FM]': { reports: [[1700000000, 'H', 2]] } } })).toBe(true);
+    expect(statusFileProblem({ ...base, satellites: { 'SO-50_[FM]': { reports: [[1700000000, 'H', 2]] } } })).toBeNull();
   });
   it('the classifier never throws on a malformed entry; it treats it as no data', () => {
     const so50 = ACTIVITIES.find((a) => a.name === 'SO-50')!;
@@ -221,16 +220,5 @@ describe('finding 7: malformed status entries fail closed instead of crashing', 
       expect(s.countsTowardMinimum).toBe(false);
       expect(s.detail).toBe('no-data');
     }
-  });
-});
-
-describe('supporting: the browser-test dependency is declared', () => {
-  it('playwright is a declared dev dependency and appears in the lockfile, so a clean `npm ci` provides it', async () => {
-    const { readFileSync } = await import('node:fs');
-    const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-    const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
-    expect(pkg.devDependencies.playwright).toMatch(/^\^1\./);
-    expect(lock.packages['node_modules/playwright']).toBeTruthy();
-    expect(lock.packages['node_modules/playwright-core']).toBeTruthy();
   });
 });
