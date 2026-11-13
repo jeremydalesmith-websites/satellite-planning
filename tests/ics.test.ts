@@ -1,4 +1,6 @@
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CALENDAR_MIN_EVENT_MIN, CALENDAR_POST_MIN, CALENDAR_SETUP_MIN, PLANNER_URL } from '../src/domain/policy.ts';
@@ -9,9 +11,11 @@ import {
   calendarTimes,
   calendarTitle,
   calendarUid,
+  enforceMinimumLength,
   escapeText,
   exactDuration,
   foldLine,
+  InvalidCalendarDataError,
 } from '../src/export/ics.ts';
 import type { CalendarPass, CalendarSource } from '../src/export/ics.ts';
 
@@ -100,14 +104,88 @@ describe('calendar times: 10 minutes of setup before the first saved AOS, 5 minu
       expect(t.extendedToMinimum).toBe(false);
     }
   });
-  it('the 15-minute minimum is enforced if the buffers ever fall short (a degenerate pass with LOS before AOS)', () => {
-    const t = calendarTimes([pass({ noradId: ISS, name: 'ISS', riseMs: T1, setMs: T1 - 3 * MIN })]);
-    expect(t.extendedToMinimum).toBe(true);
-    expect(t.endMs - t.startMs).toBe(CALENDAR_MIN_EVENT_MIN * MIN);
+  it('the minimum-length rule is a standalone timing helper: it only ever moves an end later and knows nothing about passes', () => {
+    expect(enforceMinimumLength(1_000_000, 1_000_000 + 10 * MIN)).toEqual({ endMs: 1_000_000 + 15 * MIN, extended: true });
+    expect(enforceMinimumLength(1_000_000, 1_000_000 + 15 * MIN)).toEqual({ endMs: 1_000_000 + 15 * MIN, extended: false });
+    expect(enforceMinimumLength(1_000_000, 1_000_000 + 40 * MIN)).toEqual({ endMs: 1_000_000 + 40 * MIN, extended: false });
+    expect(enforceMinimumLength(1_000_000, 1_000_000 + 2 * MIN, 5)).toEqual({ endMs: 1_000_000 + 5 * MIN, extended: true }); // another minimum
   });
-  it('an event with no passes cannot be exported', () => {
-    expect(() => calendarTimes([])).toThrow();
-    expect(() => calendarTitle([])).toThrow();
+  it('for valid passes the minimum never changes anything, so no valid event is ever reported as extended', () => {
+    for (const len of [1, 1000, 30_000, 5 * MIN, 12 * MIN, 25 * MIN]) {
+      const t = calendarTimes([pass({ noradId: ISS, name: 'ISS', riseMs: T1, setMs: T1 + len })]);
+      expect(t.extendedToMinimum).toBe(false);
+      expect(t.endMs - t.startMs).toBeGreaterThanOrEqual((CALENDAR_SETUP_MIN + CALENDAR_POST_MIN) * MIN + len - 1000);
+    }
+  });
+});
+
+describe('broken pass data is rejected, never made to look valid', () => {
+  const ok = () => source([iss(EXTRAS)]);
+  const withPass = (over: Partial<CalendarPass>) => source([iss({ ...EXTRAS, ...over })]);
+  const cases: Array<[string, Partial<CalendarPass>, RegExp]> = [
+    ['LOS equal to AOS', { setMs: T1, peakMs: T1 }, /LOS at or before its AOS/],
+    ['LOS before AOS', { setMs: T1 - 3 * MIN, peakMs: T1 - 4 * MIN }, /LOS at or before its AOS/],
+    ['NaN AOS', { riseMs: NaN }, /invalid AOS/],
+    ['NaN LOS', { setMs: NaN }, /invalid LOS/],
+    ['infinite LOS', { setMs: Infinity }, /invalid LOS/],
+    ['AOS that is not a number', { riseMs: '2026-11-14' as unknown as number }, /invalid AOS/],
+    ['undefined LOS', { setMs: undefined as unknown as number }, /invalid LOS/],
+    ['NaN peak', { peakMs: NaN }, /invalid peak/],
+    ['peak before AOS', { peakMs: T1 - 1 }, /peak outside the pass/],
+    ['peak after LOS', { peakMs: T1 + 646_200 + 1 }, /peak outside the pass/],
+    ['NaN maximum elevation', { fullMaxElevationDeg: NaN }, /invalid maximum elevation/],
+    ['negative operating time', { operatingMs: -1 }, /invalid operating time/],
+    ['NaN sunlit elevation', { eligibleMaxElevationDeg: NaN }, /invalid sunlit elevation/],
+    ['NaN direction', { riseAzDeg: NaN }, /invalid rise direction/],
+    ['threshold interval with a NaN end', { aboveThreshold: { start: T1, end: NaN } }, /invalid time-above-threshold/],
+    ['threshold interval that runs backwards', { aboveThreshold: { start: T1 + 60_000, end: T1 } }, /runs backwards/],
+  ];
+  it.each(cases)('%s: every entry point throws InvalidCalendarDataError and no file is produced', (_name, over, message) => {
+    const s = withPass(over);
+    for (const run of [
+      () => calendarTimes(s.original.counted),
+      () => calendarTitle(s.original.counted),
+      () => calendarDescription(s, BEFORE),
+      () => buildCalendarExport(s, BEFORE),
+    ]) {
+      expect(run).toThrow(InvalidCalendarDataError);
+      expect(run).toThrow(message);
+    }
+  });
+  it('a broken pass among valid ones rejects the whole event (no partial entry), and the message names the pass', () => {
+    const s = source([iss(EXTRAS), so50a({ setMs: Date.UTC(2026, 10, 15, 0, 10, 30), peakMs: Date.UTC(2026, 10, 15, 0, 10, 30) })]);
+    expect(() => buildCalendarExport(s, BEFORE)).toThrow(/pass 2 \(SO-50\)/);
+  });
+  it('a peak exactly on AOS or on LOS is allowed (the boundary is inclusive), one millisecond outside is not', () => {
+    expect(() => buildCalendarExport(withPass({ peakMs: T1 }), BEFORE)).not.toThrow();
+    expect(() => buildCalendarExport(withPass({ peakMs: T1 + 646_200 }), BEFORE)).not.toThrow();
+    expect(() => buildCalendarExport(withPass({ peakMs: T1 - 1 }), BEFORE)).toThrow(InvalidCalendarDataError);
+  });
+  it('an event with no passes, an invalid time zone, or an invalid export or saved time is rejected', () => {
+    expect(() => calendarTimes([])).toThrow(InvalidCalendarDataError);
+    expect(() => calendarTitle([])).toThrow(InvalidCalendarDataError);
+    expect(() => buildCalendarExport(source([]), BEFORE)).toThrow(InvalidCalendarDataError);
+    expect(() => buildCalendarExport(source([iss()], 'Mars/Olympus'), BEFORE)).toThrow(/time zone "Mars\/Olympus" is not valid/);
+    expect(() => buildCalendarExport(ok(), NaN)).toThrow(/export time is invalid/);
+    expect(() => buildCalendarExport(source([iss()], 'UTC', { savedAtMs: NaN }), BEFORE)).toThrow(/saved time is invalid/);
+    expect(() => buildCalendarExport(source([iss()], 'UTC', { criteria: { minElevationDeg: NaN } }), BEFORE)).toThrow(/elevation threshold/);
+  });
+  it('valid data still exports, and optional details that are absent are not errors', () => {
+    expect(() => buildCalendarExport(ok(), BEFORE)).not.toThrow();
+    expect(() => buildCalendarExport(source([iss()]), BEFORE)).not.toThrow();
+  });
+});
+
+describe('sample labels (for a test file imported into a throwaway calendar)', () => {
+  it('prefix the title and the description without changing the times, the UID or SEQUENCE; a normal export has no prefix', () => {
+    const s = source([iss(EXTRAS)], 'America/Chicago', { id: 'sample-iss-1' });
+    const plain = buildCalendarExport(s, BEFORE);
+    const sample = buildCalendarExport(s, BEFORE, { titlePrefix: 'SAMPLE — ', descriptionPrefix: 'SAMPLE: illustrative data.' });
+    expect(prop(plain.content, 'SUMMARY')).toBe('ISS 75° 11m');
+    expect(prop(sample.content, 'SUMMARY')).toBe('SAMPLE — ISS 75° 11m');
+    expect(unescape(prop(sample.content, 'DESCRIPTION')!)).toMatch(/^SAMPLE: illustrative data\.\n\nSTATIC SNAPSHOT/);
+    for (const name of ['DTSTART', 'DTEND', 'UID', 'SEQUENCE']) expect(prop(sample.content, name)).toBe(prop(plain.content, name));
+    expect(sample.filename).toBe(plain.filename);
   });
 });
 
@@ -269,19 +347,47 @@ describe('time zones', () => {
     expect(d).toContain('1:45:00 AM CST');
     expect(d).toContain('3:10:00 AM CDT');
   });
-  it('the output does not depend on the machine time zone', () => {
-    const original = process.env.TZ;
-    try {
-      const results = ['Pacific/Auckland', 'America/Chicago', 'UTC'].map((tz) => {
-        process.env.TZ = tz;
-        return buildCalendarExport(source([iss(EXTRAS), so50a(EXTRAS)]), BEFORE).content;
-      });
-      expect(results[1]).toBe(results[0]);
-      expect(results[2]).toBe(results[0]);
-    } finally {
-      if (original === undefined) delete process.env.TZ; else process.env.TZ = original;
-    }
-  });
+  it('the ACTUAL builder gives byte-identical output in processes whose system time zone really differs', () => {
+    // Each child process is STARTED with TZ set, runs the real builder (not a format of an already-UTC value), and also reports
+    // what its own system zone is, so the test fails loudly if the environment ignored TZ and the comparison was vacuous.
+    const script = `
+      import { buildCalendarExport } from ${JSON.stringify(pathToFileURL(join(process.cwd(), 'src/export/ics.ts')).href)};
+      const input = JSON.parse(process.env.SRC_JSON);
+      const probe = new Date(Date.UTC(2026, 10, 14, 23, 32, 4));
+      process.stdout.write(JSON.stringify({
+        systemZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        offsetMin: probe.getTimezoneOffset(),
+        naiveLocalHour: probe.getHours(), // what a zone-dependent implementation would have used
+        content: buildCalendarExport(input.source, input.exportedAt).content,
+      }));`;
+    const payload = JSON.stringify({ source: source([iss(EXTRAS), so50a(EXTRAS), so50b(EXTRAS)]), exportedAt: BEFORE });
+    const zones = ['Pacific/Auckland', 'America/Chicago', 'Asia/Kolkata', 'UTC'];
+    const runs = zones.map((tz) => {
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TZ: tz, SRC_JSON: payload }, encoding: 'utf8' });
+      expect(r.status, `${tz}: ${r.stderr}`).toBe(0);
+      return { tz, ...(JSON.parse(r.stdout) as { systemZone: string; offsetMin: number; naiveLocalHour: number; content: string }) };
+    });
+    // the environments really differ: each child saw its own zone, with different offsets and different local hours
+    const canonical = (z: string) => new Intl.DateTimeFormat('en-US', { timeZone: z }).resolvedOptions().timeZone; // ICU names Kolkata "Asia/Calcutta"
+    expect(runs.map((r) => r.systemZone)).toEqual(zones.map(canonical));
+    expect(runs.map((r) => r.offsetMin)).toEqual([-780, 360, -330, 0]);
+    expect(new Set(runs.map((r) => r.naiveLocalHour)).size).toBe(4); // a zone-dependent computation WOULD have differed here
+    // ...and yet the exported file is identical
+    for (const r of runs) expect(r.content).toBe(runs[0]!.content);
+    expect(prop(runs[0]!.content, 'DTSTART')).toBe('20261114T232204Z');
+  }, 60_000);
+  it('the description follows the SAVED zone, not the process zone', () => {
+    const asChicago = (tz: string) => {
+      const script = `import { calendarDescription } from ${JSON.stringify(pathToFileURL(join(process.cwd(), 'src/export/ics.ts')).href)};
+        const i = JSON.parse(process.env.SRC_JSON); process.stdout.write(calendarDescription(i.source, i.exportedAt));`;
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TZ: tz, SRC_JSON: JSON.stringify({ source: source([iss()], 'America/Chicago'), exportedAt: BEFORE }) }, encoding: 'utf8' });
+      expect(r.status, r.stderr).toBe(0);
+      return r.stdout;
+    };
+    const a = asChicago('Pacific/Auckland');
+    expect(a).toContain('5:32:04 PM CST');
+    expect(a).toBe(asChicago('UTC'));
+  }, 60_000);
 });
 
 describe('the .ics file', () => {

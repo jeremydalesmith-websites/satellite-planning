@@ -240,6 +240,15 @@ describe('the pinned planner commit contains every approved app change', () => {
     const importers = git('grep', '-l', "export/ics", 'HEAD', '--', 'src').stdout.trim();
     expect(importers).toBe('');
   });
+  it.skipIf(!known)('policy.ts may gain only comments and CALENDAR_* / PLANNER_URL constants (no other new code, so nothing else can run or change)', () => {
+    const added = git('diff', '-U0', sha, 'HEAD', '--', 'src/domain/policy.ts').stdout.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'));
+    const allowed = /^\+(\s*$|\s*\/\*\*?|\s*\*|\s*\/\/|export const (CALENDAR_[A-Z_]+|PLANNER_URL)\b)/;
+    expect(added.filter((l) => !allowed.test(l))).toEqual([]);
+  });
+  it.skipIf(!known)('src/export/ holds only the unimported builder (no index or re-export file that could pull it into the app)', () => {
+    const files = git('ls-tree', '-r', '--name-only', 'HEAD', '--', 'src/export').stdout.trim().split('\n').filter(Boolean);
+    expect(files).toEqual(['src/export/ics.ts']);
+  });
   it.skipIf(!known)('already contains each behavior the automation needs', () => {
     for (const [file, text] of [
       ['src/cluster/cluster.ts', 'rankResults'],

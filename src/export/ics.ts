@@ -59,19 +59,81 @@ export const ICS_MIME = 'text/calendar;charset=utf-8';
 const MIN = 60_000;
 const CRLF = '\r\n';
 
-const inTimeOrder = (passes: readonly CalendarPass[]): CalendarPass[] =>
-  [...passes].sort((a, b) => a.riseMs - b.riseMs || a.setMs - b.setMs || a.noradId - b.noradId);
+/** Thrown for saved data that cannot make a trustworthy calendar entry. Nothing is ever exported from such data. */
+export class InvalidCalendarDataError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidCalendarDataError';
+  }
+}
 
-/** Start, end and the key instants of the calendar entry, from the saved passes only. */
+const isTime = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * Refuse broken pass data outright: no counted passes; a timestamp that is not a finite number; LOS at or before AOS; a peak
+ * outside the pass (the peak may sit exactly on AOS or LOS); a non-finite elevation or operating time; and optional stored
+ * details that are not finite or run backwards. The minimum-length rule below is a display preference for VALID passes and is
+ * never used to make a broken pass look acceptable.
+ */
+export function validatePasses(passes: readonly CalendarPass[]): void {
+  if (passes.length === 0) throw new InvalidCalendarDataError('A saved event with no counted passes cannot be exported.');
+  passes.forEach((p, i) => {
+    const who = `pass ${i + 1} (${String(p.name)})`;
+    const bad = (why: string): never => {
+      throw new InvalidCalendarDataError(`Cannot export: ${who} ${why}.`);
+    };
+    if (!isTime(p.riseMs)) bad('has an invalid AOS time');
+    if (!isTime(p.setMs)) bad('has an invalid LOS time');
+    if (!isTime(p.peakMs)) bad('has an invalid peak time');
+    if (!(p.setMs > p.riseMs)) bad('has a LOS at or before its AOS');
+    if (p.peakMs < p.riseMs || p.peakMs > p.setMs) bad('has a peak outside the pass');
+    if (!isNumber(p.fullMaxElevationDeg)) bad('has an invalid maximum elevation');
+    if (!isNumber(p.operatingMs) || p.operatingMs < 0) bad('has an invalid operating time');
+    if (p.eligibleMaxElevationDeg !== null && !isNumber(p.eligibleMaxElevationDeg)) bad('has an invalid sunlit elevation');
+    if (p.riseAzDeg !== undefined && !isNumber(p.riseAzDeg)) bad('has an invalid rise direction');
+    if (p.setAzDeg !== undefined && !isNumber(p.setAzDeg)) bad('has an invalid set direction');
+    if (p.aboveThreshold) {
+      if (!isTime(p.aboveThreshold.start) || !isTime(p.aboveThreshold.end)) bad('has an invalid time-above-threshold interval');
+      if (p.aboveThreshold.end < p.aboveThreshold.start) bad('has a time-above-threshold interval that runs backwards');
+    }
+  });
+}
+
+function validateContext(source: CalendarSource, exportedAtMs: Ms): void {
+  if (!isTime(exportedAtMs)) throw new InvalidCalendarDataError('Cannot export: the export time is invalid.');
+  if (!isTime(source.savedAtMs)) throw new InvalidCalendarDataError('Cannot export: the saved time is invalid.');
+  if (!isNumber(source.criteria.minElevationDeg)) throw new InvalidCalendarDataError('Cannot export: the saved elevation threshold is invalid.');
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: source.timeZone });
+  } catch {
+    throw new InvalidCalendarDataError(`Cannot export: the saved time zone "${String(source.timeZone)}" is not valid.`);
+  }
+}
+
+const inTimeOrder = (passes: readonly CalendarPass[]): CalendarPass[] => {
+  validatePasses(passes);
+  return [...passes].sort((a, b) => a.riseMs - b.riseMs || a.setMs - b.setMs || a.noradId - b.noradId);
+};
+
+/**
+ * The display preference that a calendar entry is at least this long. A pure timing helper: it only ever moves an END later and
+ * knows nothing about passes. With valid passes the buffers already exceed the minimum, so it changes nothing there.
+ */
+export function enforceMinimumLength(startMs: Ms, endMs: Ms, minMinutes: number = CALENDAR_MIN_EVENT_MIN): { endMs: Ms; extended: boolean } {
+  const minimumEnd = startMs + minMinutes * MIN;
+  return endMs < minimumEnd ? { endMs: minimumEnd, extended: true } : { endMs, extended: false };
+}
+
+/** Start, end and the key instants of the calendar entry, from the saved passes only (invalid passes are refused). */
 export function calendarTimes(passes: readonly CalendarPass[]): CalendarTimes {
-  if (passes.length === 0) throw new Error('A saved event with no counted passes cannot be exported.');
+  validatePasses(passes);
   const firstAosMs = Math.min(...passes.map((p) => p.riseMs));
   const lastLosMs = Math.max(...passes.map((p) => p.setMs));
   const startMs = Math.floor((firstAosMs - CALENDAR_SETUP_MIN * MIN) / 1000) * 1000;
   const bufferedEnd = Math.ceil((lastLosMs + CALENDAR_POST_MIN * MIN) / 1000) * 1000;
-  const minimumEnd = startMs + CALENDAR_MIN_EVENT_MIN * MIN;
-  const extendedToMinimum = bufferedEnd < minimumEnd;
-  return { startMs, firstAosMs, lastLosMs, endMs: extendedToMinimum ? minimumEnd : bufferedEnd, extendedToMinimum };
+  const { endMs, extended } = enforceMinimumLength(startMs, bufferedEnd);
+  return { startMs, firstAosMs, lastLosMs, endMs, extendedToMinimum: extended };
 }
 
 /* ------------------------------------------------------------------ title */
@@ -179,6 +241,7 @@ function passBlock(p: CalendarPass, index: number, total: number, tz: string, th
 
 /** The plain-text description: setup, snapshot and per-pass details. */
 export function calendarDescription(source: CalendarSource, exportedAtMs: Ms): string {
+  validateContext(source, exportedAtMs);
   const tz = source.timeZone;
   const passes = inTimeOrder(source.original.counted);
   const t = calendarTimes(passes);
@@ -254,11 +317,25 @@ export interface CalendarExport {
   endMs: Ms;
 }
 
-/** Build the .ics text (CRLF line endings, folded lines) for a saved event, exactly as saved. */
-export function buildCalendarExport(source: CalendarSource, exportedAtMs: Ms): CalendarExport {
+/**
+ * Labels for SAMPLE files only (a test file a person imports into a throwaway calendar). The app never passes these: a real
+ * export has neither.
+ */
+export interface CalendarExportOptions {
+  /** Put in front of the title, e.g. "SAMPLE — ". */
+  titlePrefix?: string;
+  /** Put as the first lines of the description. */
+  descriptionPrefix?: string;
+}
+
+/** Build the .ics text (CRLF line endings, folded lines) for a saved event, exactly as saved. Throws InvalidCalendarDataError for broken data. */
+export function buildCalendarExport(source: CalendarSource, exportedAtMs: Ms, options: CalendarExportOptions = {}): CalendarExport {
+  validateContext(source, exportedAtMs);
   const passes = inTimeOrder(source.original.counted);
   const t = calendarTimes(passes);
-  const title = calendarTitle(passes);
+  const plainTitle = calendarTitle(passes);
+  const title = `${options.titlePrefix ?? ''}${plainTitle}`;
+  const description = `${options.descriptionPrefix ? `${options.descriptionPrefix}\n\n` : ''}${calendarDescription(source, exportedAtMs)}`;
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -271,7 +348,7 @@ export function buildCalendarExport(source: CalendarSource, exportedAtMs: Ms): C
     `DTSTART:${icsTime(t.startMs)}`,
     `DTEND:${icsTime(t.endMs)}`,
     `SUMMARY:${escapeText(title)}`,
-    `DESCRIPTION:${escapeText(calendarDescription(source, exportedAtMs))}`,
+    `DESCRIPTION:${escapeText(description)}`,
     `URL:${PLANNER_URL}`,
     'TRANSP:OPAQUE',
     'END:VEVENT',
@@ -280,6 +357,6 @@ export function buildCalendarExport(source: CalendarSource, exportedAtMs: Ms): C
   const stamp = new Intl.DateTimeFormat('en-CA', { timeZone: source.timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
     .formatToParts(t.firstAosMs)
     .reduce<Record<string, string>>((acc, p) => ({ ...acc, [p.type]: p.value }), {});
-  const filename = `${safe(passes.length === 1 ? title : `${passes.length}-passes`)}-${stamp.year}${stamp.month}${stamp.day}-${stamp.hour}${stamp.minute}.ics`;
+  const filename = `${safe(passes.length === 1 ? plainTitle : `${passes.length}-passes`)}-${stamp.year}${stamp.month}${stamp.day}-${stamp.hour}${stamp.minute}.ics`;
   return { filename, mimeType: ICS_MIME, content: lines.map(foldLine).join(CRLF) + CRLF, title, startMs: t.startMs, endMs: t.endMs };
 }
