@@ -1,8 +1,9 @@
-# Proposed: automatic daily data update for k1kfx.com/satellites/
+# Proposed: automated data update for k1kfx.com/satellites/ (manual first, daily later)
 
 **Status: a draft for the owner's review. Nothing here is enabled.** `update-satellites.yml` sits in `deploy/`, not in
 `.github/workflows/`, so it cannot run from this repository. It would be copied to the website repository only after the
-owner approves that specific change.
+owner approves that specific change. **Initial operation is manual only:** the file has the "Run workflow" trigger and
+**no schedule**. See "Rollout" below.
 
 ## The arrangement it keeps
 
@@ -11,9 +12,28 @@ of the website repository (`k1kfx.com`, branch `main`), which GitHub Pages serve
 keeps that arrangement: no Cloudflare project, no DNS change, no change of Pages source, no backend, no public "Update
 now" button, and no polling in the browser. It automates the copy that is now done by hand with GitHub Desktop.
 
+## Rollout: manual first, schedule later
+
+1. **Install, manual only.** The workflow file is added to the website repository with `workflow_dispatch` as its only
+   trigger. Nothing runs on its own, so it cannot publish anything until the owner presses the button.
+2. **One manual run, verified.** The owner adds `SITE_PUSH_TOKEN`, runs it once, and checks: the run is green; the public
+   `https://k1kfx.com/satellites/data/status.json` shows the new download time; the single bot commit changed only files under
+   `satellites/`; `hunt/`, `CNAME` and the other pages are untouched; the planner page loads and searches normally; and no
+   failure issue was opened. If the run fails, the issue and the Actions log show where; nothing was published unless the
+   failing step was the final live check.
+3. **Schedule added only after that.** A separate, reviewed change to the workflow file then adds the daily trigger (UTC,
+   at an off-the-hour minute; GitHub may start scheduled runs late):
+   ```yaml
+   on:
+     schedule:
+       - cron: '17 9 * * *'
+     workflow_dispatch: {}
+   ```
+   Until that change is made and approved, no schedule exists, and the tests require its absence.
+
 ## What one run does
 
-Every 24 hours (09:17 UTC) and whenever the owner presses **Run workflow** in the website repo's Actions tab:
+Only when the owner presses **Run workflow** in the website repo's Actions tab (there is no schedule yet):
 
 1. Stops at once, with a clear message, if the push token secret is missing or if GitHub Pages is no longer published from
    the `main` branch (checked through the Pages settings API), before anything is changed.
@@ -91,13 +111,14 @@ successful download and are never advanced by a failed one.
 Scheduled workflows always run from the **default branch of the repository that holds them**. They cannot follow a
 feature branch, and they must not silently build a stale or unapproved branch. So:
 
-* The workflow lives in the **website** repo's `main`, which is what a schedule runs.
+* The workflow lives in the **website** repo's `main`, the branch GitHub uses for any schedule added later (a schedule always
+  runs the default branch's copy of the file).
 * It does **not** build "whatever the planner's default branch is". The planner's `main` still holds only the initial
   commit, and the approved code is on `feature/strict-eligibility`, unmerged. The workflow instead checks out **one
   pinned commit**, `PLANNER_SHA` at the top of the file, currently `aff62d0ba20c1ab26d12a1b6a9e051bcd1a26a56`, the commit
   containing everything described here (it must be pushed to the planner repository first so the pin exists remotely).
 * Nothing is merged for this. To publish a newer planner version later, change `PLANNER_SHA` in a reviewed one-line commit
-  to the website repo. A planner change is always a deliberate act, never a side effect of the daily schedule. (Merging
+  to the website repo. A planner change is always a deliberate act, never a side effect of a run, manual or scheduled. (Merging
   the planner pull requests is a separate decision; after it, the pin could instead track `main`.)
 
 ## Required settings, secrets and cost
@@ -162,15 +183,18 @@ runners and the real repositories), so its other YAML and shell steps are review
 
 ## Limitations (stated plainly)
 
-* GitHub may start a scheduled run several minutes late, or occasionally skip one under load. A late run can make the
+* **Until the schedule is added the data does not refresh by itself.** After the manual run the planner shows the data's real
+  age ("Keplers updated N hours ago · Activity reports updated N hours ago"), and the activity-report notices appear once it
+  is over 24 hours old; the 72-hour rule means nothing stays eligible without fresh reports.
+* **Once a schedule is added:** GitHub may start a scheduled run several minutes late, or occasionally skip one under load. A late run can make the
   activity reports show their "over 24 hours old" notice for a short time before the next update lands. The cadence
   asked for is 24 hours; every 12 hours would remove that edge case at the cost of 18 more AMSAT requests a day.
-* GitHub disables scheduled workflows after 60 days without repository activity. The daily commit is itself activity, so
+* Once a schedule exists, GitHub disables scheduled workflows after 60 days without repository activity. The daily commit is itself activity, so
   it should keep itself alive, but this has not been observed; no issue appears if GitHub simply stops scheduling. Run
   workflow re-enables it.
 * A run only proves the data is fresh and valid. It cannot tell whether an amateur-radio repeater is actually working;
   that still comes only from volunteer reports (the 72-hour rule is unchanged).
-* The daily commits add about 25 KB (data) to the website repo's history each day; a code change adds a new build.
+* Each run (and, later, each daily run) adds about 25 KB of data to the website repo's history; a code change adds a new build.
 
 ## Caching, and what an open tab does
 

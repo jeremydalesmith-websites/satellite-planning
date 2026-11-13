@@ -3,7 +3,11 @@
 #   .github/workflows/update-satellites.yml        (branch: main)
 # It is deliberately NOT under .github/workflows here, so it cannot run from this repository.
 #
-# What it does, once a day and on demand ("Run workflow"):
+# ROLLOUT: MANUAL ONLY AT FIRST. This version runs only when the owner presses "Run workflow" (workflow_dispatch). There is
+# deliberately NO schedule trigger yet. A daily schedule will be added, as a separate reviewed change, only after the first
+# successful manual run has been verified (see deploy/README.md, "Rollout").
+#
+# What one run does:
 #   1. downloads fresh Keplers and activity reports with the planner's own refresh script (strict: all or nothing)
 #   2. validates the downloaded files, runs the planner's tests and builds the planner for /satellites/
 #   3. ONLY THEN checks out the website, replaces ONLY its satellites/ folder with that build and pushes one commit to main
@@ -36,9 +40,7 @@
 name: Update satellites
 
 on:
-  schedule:
-    - cron: '17 9 * * *' # every 24 hours, 09:17 UTC (an off-the-hour minute; GitHub may delay scheduled runs)
-  workflow_dispatch: {} # manual "Run workflow" button in the Actions tab
+  workflow_dispatch: {} # manual "Run workflow" button in the Actions tab; the only trigger for now (no schedule yet)
 
 # One run at a time; a second run waits rather than racing the first.
 concurrency:
@@ -49,8 +51,8 @@ concurrency:
 permissions: {}
 
 env:
-  # The approved planner version: a PINNED COMMIT (not a branch), so the schedule always publishes exactly the code the
-  # owner approved and never whatever happens to be on a branch. To publish a newer planner version: change this SHA
+  # The approved planner version: a PINNED COMMIT (not a branch), so every run publishes exactly the code the
+  # owner approved and never whatever happens to be on a branch, whether the run is manual or (later) scheduled. To publish a newer planner version: change this SHA
   # (a reviewed one-line commit to this file). See deploy/README.md.
   PLANNER_REPO: jeremydalesmith-websites/satellite-planning
   PLANNER_SHA: aff62d0ba20c1ab26d12a1b6a9e051bcd1a26a56
@@ -212,6 +214,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           title="Satellite data update failed"
-          body="The scheduled satellite update failed. The previously published planner and data are unchanged unless the failing step was the final live check. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="The satellite update failed. The previously published planner and data are unchanged unless the failing step was the final live check. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"; else gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"; fi

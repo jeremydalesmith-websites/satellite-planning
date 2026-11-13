@@ -28,11 +28,19 @@ const step = (fragment: string) => {
 const indexOfStep = (fragment: string) => steps.indexOf(step(fragment));
 
 describe('triggers and concurrency', () => {
-  it('runs on a daily schedule and on manual dispatch only (no push or pull_request trigger, so it cannot loop)', () => {
-    expect(code).toMatch(/schedule:\n\s+- cron: '[^']+'/);
+  it('is manual-only for the initial rollout: workflow_dispatch is required and there is NO active schedule or other trigger', () => {
+    const on = /\non:\n((?:  [^\n]*\n|\n)+)/.exec(code + '\n')?.[1] ?? '';
+    expect(on).toMatch(/^  workflow_dispatch:/m);
     expect(code).toContain('workflow_dispatch');
-    expect(code).not.toMatch(/\n\s+(push|pull_request|pull_request_target|workflow_run|repository_dispatch):/);
-    expect(code).toMatch(/cron: '\d+ \d+ \* \* \*'/); // once a day
+    expect(code).not.toMatch(/\n\s*schedule:/);
+    expect(code).not.toMatch(/\bcron:/);
+    expect(code).not.toMatch(/\n\s+(push|pull_request|pull_request_target|workflow_run|repository_dispatch|workflow_call):/); // nothing else can start it, so it cannot loop
+    expect(on.split('\n').filter((l) => /^ {2}\S/.test(l)).map((l) => l.trim().split(':')[0])).toEqual(['workflow_dispatch']);
+  });
+  it('even commented-out scheduling is absent from the file (the daily trigger is described in the README and added later)', () => {
+    expect(yml).not.toMatch(/cron:/);
+    expect(readFileSync('deploy/README.md', 'utf8')).toMatch(/Schedule added only after that/i);
+    expect(yml).toMatch(/MANUAL ONLY AT FIRST/);
   });
   it('never overlaps itself and never cancels a run in progress', () => {
     expect(code).toMatch(/concurrency:\n\s+group: update-satellites\n\s+cancel-in-progress: false/);
