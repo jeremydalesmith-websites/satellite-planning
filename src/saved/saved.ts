@@ -21,7 +21,22 @@ import type { PredictionMeta } from '../planner.ts';
 
 export const SAVED_SCHEMA = 2 as const;
 
-export interface SavedOpportunity {
+/**
+ * Optional details stored for events saved from now on, so the calendar export can show them exactly as they were when the plan
+ * was saved. Events saved earlier do not have them and are NEVER filled in from current predictions (the export says once that some
+ * details were not saved). They are information only: re-checks and every planning rule ignore them.
+ */
+export interface SavedPassDetails {
+  /** Compass azimuth (degrees) at AOS and at LOS. */
+  riseAzDeg?: number;
+  setAzDeg?: number;
+  /** When elevation was at or above the selected minimum: an interval, or null if it never was. Absent = not stored. */
+  aboveThreshold?: Interval | null;
+  /** Sunlight at the satellite over the whole pass. */
+  sunlight?: 'illuminated' | 'partly-eclipsed' | 'eclipsed';
+}
+
+export interface SavedOpportunity extends SavedPassDetails {
   noradId: number;
   name: string;
   riseMs: Ms;
@@ -67,6 +82,10 @@ function toSaved(a: PassAssessment): SavedOpportunity {
     fullMaxElevationDeg: a.fullMaxElevationDeg,
     eligibleMaxElevationDeg: a.eligibleMaxElevationDeg,
     statusState: a.status.state,
+    riseAzDeg: a.riseAzDeg,
+    setAzDeg: a.setAzDeg,
+    aboveThreshold: a.aboveThreshold ? { ...a.aboveThreshold } : null,
+    sunlight: a.sunlight,
   };
 }
 

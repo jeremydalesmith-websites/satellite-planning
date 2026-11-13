@@ -1,8 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ACTIVITIES } from '../catalog/catalog.ts';
 import type { LoadedData } from '../planner.ts';
+import { InvalidCalendarDataError, buildCalendarExport, lostEligibilityAlerts } from '../export/ics.ts';
 import { recheckSavedEvent } from '../saved/recheck.ts';
 import type { SavedEvent } from '../saved/saved.ts';
+import { downloadTextFile } from './download.ts';
 import { PassCard } from './PassCard.tsx';
 import { Timeline } from './Timeline.tsx';
 import { fmtDateTime, fmtDay, fmtEndMin, fmtSpanMin, fmtStartMin, fmtTime, tzAbbrev } from './format.ts';
@@ -52,6 +54,22 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
   const out = useMemo(() => recheckSavedEvent(ev, data, nowMs), [ev, data, nowMs]);
   const tz = ev.timeZone;
   const c = ev.criteria;
+  const [calendarMsg, setCalendarMsg] = useState<{ kind: 'done' | 'error'; text: string } | null>(null);
+
+  /**
+   * Download a calendar file for this event as SAVED (the saved times and details, never recalculated ones). The only thing taken
+   * from the re-check is a current lost-eligibility warning, which goes at the top of the description. Nothing is sent anywhere.
+   */
+  const addToCalendar = () => {
+    try {
+      const alerts = out.ok ? lostEligibilityAlerts(out.recheck.lostEligibility) : [];
+      const file = buildCalendarExport({ ...ev, alerts }, Date.now());
+      downloadTextFile(file.filename, file.content, file.mimeType);
+      setCalendarMsg({ kind: 'done', text: `Calendar file downloaded (${file.filename}). It is a static copy of the saved plan and will not update if predictions change.` });
+    } catch (e) {
+      setCalendarMsg({ kind: 'error', text: `${e instanceof InvalidCalendarDataError ? e.message : 'The calendar file could not be created.'} Nothing was downloaded.` });
+    }
+  };
 
   return (
     <article className="card event saved" aria-label={`Saved event ${fmtDay(ev.window.start, tz)}`}>
@@ -65,8 +83,14 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
             Needs {c.minOpportunities === 1 ? 'at least 1 pass' : `${c.minOpportunities}+ passes`} peaking at {c.minElevationDeg}°+ · location {ev.location.latDeg.toFixed(2)}, {ev.location.lonDeg.toFixed(2)} · saved {fmtDateTime(ev.savedAtMs, tz)}
           </p>
         </div>
-        <button type="button" className="danger" onClick={onDelete}>Delete</button>
+        <div className="card-actions">
+          <button type="button" onClick={addToCalendar} title="Download a calendar file (.ics) with this event's saved times">Add to calendar</button>
+          <button type="button" className="danger" onClick={onDelete}>Delete</button>
+        </div>
       </header>
+      {calendarMsg && (
+        <p className={calendarMsg.kind === 'error' ? 'notice warn' : 'hint small'} role={calendarMsg.kind === 'error' ? 'alert' : 'status'}>{calendarMsg.text}</p>
+      )}
 
       <p className="summary">
         When saved: <strong>{ev.original.counted.length}</strong> passes from <strong>{ev.original.distinctSatellites}</strong> satellite{ev.original.distinctSatellites === 1 ? '' : 's'}

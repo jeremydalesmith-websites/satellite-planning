@@ -21,20 +21,10 @@ import { ACTIVITIES } from '../catalog/catalog.ts';
 import type { FmActivity } from '../catalog/catalog.ts';
 import { CALENDAR_MIN_EVENT_MIN, CALENDAR_POST_MIN, CALENDAR_SETUP_MIN, PLANNER_URL } from '../domain/policy.ts';
 import type { Criteria, Interval, Ms } from '../domain/types.ts';
-import type { SavedOpportunity } from '../saved/saved.ts';
+import type { SavedOpportunity, SavedPassDetails } from '../saved/saved.ts';
 
-/**
- * Details that NEWLY saved events will carry (a later stage adds them to SavedOpportunity). Older saved events lack them, and
- * they are never reconstructed from current predictions: the export says once that some details were not stored.
- */
-export interface StoredPassExtras {
-  riseAzDeg?: number;
-  setAzDeg?: number;
-  /** null = stored, and the pass never reached the threshold; undefined = not stored. */
-  aboveThreshold?: Interval | null;
-  /** Sunlight at the satellite over the whole pass. */
-  sunlight?: 'illuminated' | 'partly-eclipsed' | 'eclipsed';
-}
+/** The optional details newly saved events carry (see SavedPassDetails). Older events lack them; they are never reconstructed. */
+export type StoredPassExtras = SavedPassDetails;
 export type CalendarPass = SavedOpportunity & StoredPassExtras;
 
 /** The part of a saved event the export needs (any SavedEvent fits). */
@@ -383,4 +373,19 @@ export function buildCalendarExport(source: CalendarSource, exportedAtMs: Ms, op
     .reduce<Record<string, string>>((acc, p) => ({ ...acc, [p.type]: p.value }), {});
   const filename = `${safe(passes.length === 1 ? plainTitle : `${passes.length}-passes`)}-${stamp.year}${stamp.month}${stamp.day}-${stamp.hour}${stamp.minute}.ics`;
   return { filename, mimeType: ICS_MIME, content: lines.map(foldLine).join(CRLF) + CRLF, title, startMs: t.startMs, endMs: t.endMs };
+}
+
+/**
+ * Short alert texts for saved passes whose satellite no longer qualifies at the latest re-check (one per satellite), for the top of
+ * the calendar description. The planner's re-check supplies the satellite and the reason; this only words it.
+ */
+export function lostEligibilityAlerts(lost: ReadonlyArray<{ name: string; reason: string }>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const l of lost) {
+    if (seen.has(l.name)) continue;
+    seen.add(l.name);
+    out.push(`${l.name} no longer qualifies: ${l.reason.replace(/\.+$/, '')}. Re-check before the event.`);
+  }
+  return out;
 }
