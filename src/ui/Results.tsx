@@ -2,6 +2,8 @@ import type { PlanInputs, PlanResult } from '../planner.ts';
 import type { Ms } from '../domain/types.ts';
 import { ACTIVITIES } from '../catalog/catalog.ts';
 import { STATUS_AGE_NOTICE_HOURS, STATUS_WINDOW_HOURS } from '../domain/policy.ts';
+import { SORT_LABELS } from '../cluster/cluster.ts';
+import type { SortBy } from '../cluster/cluster.ts';
 import { fmtAgo } from './format.ts';
 import { EventCard } from './EventCard.tsx';
 
@@ -12,16 +14,20 @@ interface Props {
   isSaved: (windowStart: number, windowEnd: number) => boolean;
   onSave: (idx: number) => void;
   statusProblem: string | null;
+  sortBy?: SortBy;
+  onSortChange?: (s: SortBy) => void;
 }
 
-export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem }: Props) {
+export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem, sortBy = 'date', onSortChange = () => {} }: Props) {
   const { criteria, timeZone: tz } = inputs;
   const { windows, diagnosis, eligibility } = result;
   const names = (id: number) => ACTIVITIES.find((a) => a.noradId === id)?.name ?? String(id);
   const considered = result.consideredNoradIds.map(names);
   const excluded = eligibility.filter((e) => !e.eligible);
   const unselected = eligibility.filter((e) => e.eligible && !result.consideredNoradIds.includes(e.noradId));
-  // Status freshness is judged from when the STATUS reports were downloaded (not the orbital data).
+  // Freshness is retrieval time only: Keplers = last successful orbital download, Activity reports = last successful status
+  // download. Neither is an element epoch or an individual report time. Status age drives the 24 h / 72 h warnings.
+  const elementsAt = result.meta.elementsDownloadedAt ? Date.parse(result.meta.elementsDownloadedAt) : null; // when the Keplers were successfully downloaded (not their epochs)
   const statusAt = result.meta.statusDownloadedAt ? Date.parse(result.meta.statusDownloadedAt) : null;
   const statusAgeHours = statusAt === null ? null : Math.max(0, nowMs - statusAt) / 3_600_000;
   const diagCount = excluded.length + result.skipped.length;
@@ -29,43 +35,38 @@ export function Results({ inputs, result, nowMs, isSaved, onSave, statusProblem 
 
   return (
     <section aria-labelledby="results-title" className="results">
-      <h2 id="results-title" tabIndex={-1}>
-        {single
-          ? result.windowsTotal > 0
-            ? `${result.windowsTotal} qualifying pass${result.windowsTotal === 1 ? '' : 'es'}`
-            : 'No qualifying passes'
-          : windows.length > 0
-            ? `${windows.length} promising event window${windows.length === 1 ? '' : 's'}`
-            : 'No qualifying event windows'}
-      </h2>
-      <p className="hint">
-        {single ? (
-          <>
-            Single passes reaching a peak of {criteria.minElevationDeg}° or higher, with the whole pass (rise to set) inside your availability, ranked by maximum elevation (highest first; earlier first on a tie).
-          </>
-        ) : (
-          <>
-            Clusters of at least {criteria.minOpportunities} separate passes, each reaching a peak of {criteria.minElevationDeg}° or higher, with every full pass (rise to set) inside your availability and within a maximum span of {criteria.maxSpanMin / 60} hours.
-          </>
-        )}
-        {' '}Satellites considered: <strong>{considered.length ? considered.join(', ') : 'none (no selected satellite currently qualifies)'}</strong>.
-      </p>
-      {single && windows.length < result.windowsTotal && <p className="hint small">Showing the highest {windows.length} of {result.windowsTotal}.</p>}
+      <div className="results-intro">
+        <div className="results-head">
+          <h2 id="results-title" tabIndex={-1}>
+            {result.windowsTotal === 0 ? 'No results' : `${result.windowsTotal} result${result.windowsTotal === 1 ? '' : 's'}`}
+          </h2>
+          <label className="sort-by">
+            Sort by
+            <select value={sortBy} onChange={(e) => onSortChange(e.target.value as SortBy)}>
+              <option value="date">{SORT_LABELS.date}</option>
+              <option value="elevation">{SORT_LABELS.elevation}</option>
+              {!single && <option value="count">{SORT_LABELS.count}</option>}
+            </select>
+          </label>
+        </div>
+        <p className="freshness" aria-label="Data freshness">
+          {elementsAt !== null ? `Keplers updated ${fmtAgo(elementsAt, nowMs)}` : 'Keplers update time unavailable'}
+          {' · '}
+          {statusAt !== null ? `Activity reports updated ${fmtAgo(statusAt, nowMs)}` : 'Activity reports unavailable'}
+        </p>
+        {windows.length < result.windowsTotal && <p className="hint small">Showing the first {windows.length} of {result.windowsTotal} in this order.</p>}
+      </div>
 
-      {statusAt !== null && statusAgeHours !== null && statusAgeHours <= STATUS_AGE_NOTICE_HOURS && (
-        <p className="hint small status-age">Status updated {fmtAgo(statusAt, nowMs)}.</p>
-      )}
       {statusAt !== null && statusAgeHours !== null && statusAgeHours > STATUS_AGE_NOTICE_HOURS && statusAgeHours <= STATUS_WINDOW_HOURS && (
         <p className="notice warn" role="note">
-          Status updated {fmtAgo(statusAt, nowMs)}. Reports filed since then are not included, so eligibility may be out of date; this copy of the status data needs refreshing.
+          Activity reports are over {STATUS_AGE_NOTICE_HOURS} hours old, so newer reports are not included and eligibility may be out of date.
         </p>
       )}
       {statusAt !== null && statusAgeHours !== null && statusAgeHours > STATUS_WINDOW_HOURS && (
         <p className="notice warn" role="note">
-          Status updated {fmtAgo(statusAt, nowMs)}. Reports older than {STATUS_WINDOW_HOURS} hours cannot qualify a satellite, so few or none can be eligible until the status data is refreshed.
+          Activity reports are over {STATUS_WINDOW_HOURS} hours old and cannot qualify a satellite, so few or none can be eligible until they are refreshed.
         </p>
       )}
-      {statusAt === null && !statusProblem && <p className="hint small status-age">Status data unavailable.</p>}
       {statusProblem && <p className="notice warn" role="note">{statusProblem}</p>}
       {result.predictionErrors.length > 0 && (
         <p className="notice warn" role="note">

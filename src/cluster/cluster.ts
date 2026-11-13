@@ -20,9 +20,17 @@
  * AOS-to-LOS is the window), ranked by maximum elevation, highest first, with the earlier AOS breaking ties. The maximum
  * span does not apply. All other rules (selection by peak, sunlight, eligibility, availability fit) are unchanged.
  *
- * Ranking of clusters: (1) number of passes, (2) total operating time, (3) sum of maximum elevations,
- * (4) earlier start. Exact duplicates (same counted passes) are removed. A shorter cluster with fewer passes is a
- * distinct set and is kept; the display limit applies.
+ * SORTING (user-selected; the default is Date). The sort never changes which results exist, only their order, and it is
+ * applied to the COMPLETE candidate list BEFORE the display limit, so the limit always keeps the true first N:
+ *   Date:       soonest start first (ties: more passes, then higher lowest-elevation).
+ *   Elevation:  highest first. A pass's elevation is the maximum reached while operation is permitted. A cluster is
+ *               scored by the LOWEST of those among its counted passes ("consistently high"). Ties: earlier start.
+ *   Pass count: most counted passes first (clusters only). Ties: earlier start.
+ * Candidate generation keeps, for every window (an anchor AOS to a possible end), the Pareto frontier of
+ * (number of passes, lowest elevation): the biggest set, and also each smaller set whose lowest elevation is strictly
+ * higher. Without that, a count-first selection could hide the best Elevation result (a pair of 80 and 75 degree passes
+ * would be hidden behind a three-pass set that includes a 45 degree pass). Exact duplicates are removed; distinct
+ * counted sets are all kept.
  */
 import { RESULT_LIMIT, SAVED_EDGE_TOLERANCE_SEC, SINGLE_PASS_RESULT_LIMIT } from '../domain/policy.ts';
 import { contains } from '../domain/intervals.ts';
@@ -113,7 +121,12 @@ export interface WindowEvaluation {
   totalOperatingMs: number;
   distinctSatellites: number;
   sumEligibleMaxElevationDeg: number;
+  /** The LOWEST usable maximum elevation among the counted passes (the Elevation sort key for clusters). */
+  minUsableElevationDeg: number;
 }
+
+/** The maximum elevation reached while operation is permitted (the pass maximum, except for a sunlight-limited pass). */
+export const usableElevation = (a: Pick<PassAssessment, 'eligibleMaxElevationDeg' | 'fullMaxElevationDeg'>): number => a.eligibleMaxElevationDeg ?? a.fullMaxElevationDeg;
 
 function summarize(
   window: Interval,
@@ -132,6 +145,7 @@ function summarize(
     totalOperatingMs: counted.reduce((s, c) => s + c.operatingMs, 0),
     distinctSatellites: new Set(counted.map((c) => c.noradId)).size,
     sumEligibleMaxElevationDeg: counted.reduce((s, c) => s + (c.eligibleMaxElevationDeg ?? 0), 0),
+    minUsableElevationDeg: counted.length ? Math.min(...counted.map(usableElevation)) : 0,
   };
 }
 
@@ -178,29 +192,38 @@ function clusterDetail(counted: PassAssessment[], all: readonly PassAssessment[]
 /** A search result: one cluster (or, in single-pass mode, one pass). */
 export type EventWindow = WindowEvaluation;
 
-function compareClusters(a: WindowEvaluation, b: WindowEvaluation): number {
-  return (
-    b.counted.length - a.counted.length ||
-    b.totalOperatingMs - a.totalOperatingMs ||
-    b.sumEligibleMaxElevationDeg - a.sumEligibleMaxElevationDeg ||
-    a.window.start - b.window.start
-  );
+export type SortBy = 'date' | 'elevation' | 'count';
+export const SORT_LABELS: Record<SortBy, string> = { date: 'Date', elevation: 'Elevation', count: 'Pass count' };
+
+const passKey = (w: WindowEvaluation) => w.counted.map((c) => c.passId).join('|');
+
+/** Sort comparators. Every one ends in the pass ids, so the order is total and stable. */
+function comparator(sort: SortBy, single: boolean): (a: WindowEvaluation, b: WindowEvaluation) => number {
+  const byDate = (a: WindowEvaluation, b: WindowEvaluation) => a.window.start - b.window.start;
+  const byElevation = (a: WindowEvaluation, b: WindowEvaluation) => b.minUsableElevationDeg - a.minUsableElevationDeg;
+  const byCount = (a: WindowEvaluation, b: WindowEvaluation) => b.counted.length - a.counted.length;
+  const byOpTime = (a: WindowEvaluation, b: WindowEvaluation) => b.totalOperatingMs - a.totalOperatingMs;
+  const byKey = (a: WindowEvaluation, b: WindowEvaluation) => passKey(a).localeCompare(passKey(b));
+  if (sort === 'elevation') return (a, b) => byElevation(a, b) || byDate(a, b) || byCount(a, b) || byOpTime(a, b) || byKey(a, b);
+  if (sort === 'count' && !single) return (a, b) => byCount(a, b) || byDate(a, b) || byElevation(a, b) || byOpTime(a, b) || byKey(a, b);
+  return (a, b) => byDate(a, b) || byCount(a, b) || byElevation(a, b) || byOpTime(a, b) || byKey(a, b); // Date (and the fallback)
 }
 
 export interface FindOptions {
-  /** Maximum cluster span in minutes (earliest AOS to latest LOS). */
+  /** Maximum cluster span in minutes (earliest AOS to latest LOS). Ignored in single-pass mode. */
   maxSpanMin: number;
   minOpportunities: number;
+  /** Order of the results; default Date (soonest first). */
+  sort?: SortBy;
+  /** Display limit applied AFTER sorting (default: the mode's own limit). */
   limit?: number;
 }
 
 /**
- * Every qualifying pass as its own result (single-pass mode), highest maximum elevation first. The elevation ranked is the
- * highest reached while operation is permitted (equal to the pass maximum except for a sunlight-limited pass), so a pass is
- * never ranked by an elevation the operator cannot use. Ties: earlier AOS, then pass id, for a stable order.
+ * Every qualifying pass as its own result (single-pass mode). Each pass is a result of its own, sorted as requested.
  * A pass counts only if its whole AOS-to-LOS lies inside one availability block, like any other cluster.
  */
-export function findSinglePasses(all: readonly PassAssessment[], availability: readonly Interval[]): EventWindow[] {
+export function findSinglePasses(all: readonly PassAssessment[], availability: readonly Interval[], sort: SortBy = 'date'): EventWindow[] {
   const seen = new Set<string>();
   const out: EventWindow[] = [];
   for (const block of availability) {
@@ -211,26 +234,19 @@ export function findSinglePasses(all: readonly PassAssessment[], availability: r
       out.push(summarize({ start: a.riseMs, end: a.setMs }, [a], [], [], []));
     }
   }
-  const elevation = (w: WindowEvaluation) => w.counted[0]!.eligibleMaxElevationDeg ?? w.counted[0]!.fullMaxElevationDeg;
-  return out.sort((x, y) => elevation(y) - elevation(x) || x.window.start - y.window.start || x.counted[0]!.passId.localeCompare(y.counted[0]!.passId));
+  return out.sort(comparator(sort, true));
 }
 
 /**
- * Find ranked clusters.
+ * ALL clusters (no display limit), sorted. Candidates are generated once, independently of the sort.
  * @param availability normalized absolute intervals (the ONLY availability input). Each cluster's full
  *   AOS-to-LOS envelope must lie inside ONE of them.
  */
-export function findEventWindows(
-  all: readonly PassAssessment[],
-  availability: readonly Interval[],
-  opts: FindOptions,
-): EventWindow[] {
-  if (opts.minOpportunities <= 1) return findSinglePasses(all, availability).slice(0, opts.limit ?? SINGLE_PASS_RESULT_LIMIT);
+export function findAllWindows(all: readonly PassAssessment[], availability: readonly Interval[], opts: FindOptions): EventWindow[] {
+  if (opts.minOpportunities <= 1) return findSinglePasses(all, availability, opts.sort);
   const span = opts.maxSpanMin * 60_000;
   const eligible = all.filter((a) => a.verdict === 'eligible' && a.operatingIntervals.length > 0);
 
-  // Distinct counted sets. For every anchor (a pass's AOS) and every possible end (a pass's LOS) within the
-  // span, take the best set that fits; this also yields shorter clusters with fewer passes.
   const sets = new Map<string, PassAssessment[]>();
   for (const block of availability) {
     const inBlock = eligible.filter((a) => a.riseMs >= block.start && a.setMs <= block.end).sort((x, y) => x.riseMs - y.riseMs);
@@ -238,16 +254,31 @@ export function findEventWindows(
       const ends = [...new Set(inBlock.filter((p) => p.riseMs >= anchor.riseMs && p.setMs - anchor.riseMs <= span).map((p) => p.setMs))].sort((x, y) => x - y);
       for (const end of ends) {
         const candidates = inBlock.filter((p) => p.riseMs >= anchor.riseMs && p.setMs <= end);
-        const counted = selectNonOverlapping(candidates);
-        if (counted.length < opts.minOpportunities) continue;
-        const key = counted.map((c) => c.passId).join(',');
-        if (!sets.has(key)) sets.set(key, counted);
+        // The Pareto frontier of (passes, lowest elevation) for this window: walk the elevation threshold downwards and
+        // keep a set only when it has strictly more passes than every set with a higher lowest-elevation.
+        const thresholds = [...new Set(candidates.map(usableElevation))].sort((x, y) => y - x);
+        let keptCount = 0;
+        for (const t of thresholds) {
+          const counted = selectNonOverlapping(candidates.filter((p) => usableElevation(p) >= t));
+          if (counted.length < opts.minOpportunities || counted.length <= keptCount) continue;
+          keptCount = counted.length;
+          const key = counted.map((c) => c.passId).join(',');
+          if (!sets.has(key)) sets.set(key, counted);
+        }
       }
     }
   }
-
-  const clusters = [...sets.values()].map((counted) => clusterDetail(counted, all));
-  clusters.sort(compareClusters);
-  return clusters.slice(0, opts.limit ?? RESULT_LIMIT);
+  return [...sets.values()].map((counted) => clusterDetail(counted, all)).sort(comparator(opts.sort ?? 'date', false));
 }
 
+/** Sorted results, then the display limit: the limit always keeps the true first N of the chosen order. */
+export function rankResults(all: readonly PassAssessment[], availability: readonly Interval[], opts: FindOptions): { windows: EventWindow[]; windowsTotal: number } {
+  const every = findAllWindows(all, availability, opts);
+  const limit = opts.limit ?? (opts.minOpportunities <= 1 ? SINGLE_PASS_RESULT_LIMIT : RESULT_LIMIT);
+  return { windows: every.slice(0, limit), windowsTotal: every.length };
+}
+
+/** The first results of the chosen order (see rankResults for the total). */
+export function findEventWindows(all: readonly PassAssessment[], availability: readonly Interval[], opts: FindOptions): EventWindow[] {
+  return rankResults(all, availability, opts).windows;
+}

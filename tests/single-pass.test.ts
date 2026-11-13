@@ -16,7 +16,8 @@ const P = (rise: number, set: number, el = 60, norad = SO50, st: Parameters<type
   assessed({ norad, rise, set, maxEl: el, thr }, st);
 const AO = (rise: number, set: number, maxEl: number, sun: Array<[number, number, boolean, number]>, thr = 40) => assessed({ norad: AO91, rise, set, maxEl, sun, thr });
 const block = (a: number, b: number) => [iv(a, b)];
-const find = (all: ReturnType<typeof P>[], blocks = block(0, 1000), min = 1, span = 150) => findEventWindows(all, blocks, { maxSpanMin: span, minOpportunities: min });
+// These tests were written for the elevation order, so the helper asks for it explicitly (the app default is Date).
+const find = (all: ReturnType<typeof P>[], blocks = block(0, 1000), min = 1, span = 150) => findEventWindows(all, blocks, { maxSpanMin: span, minOpportunities: min, sort: 'elevation' });
 
 describe('each qualifying pass is its own result', () => {
   it('passes that would form one cluster come back as separate one-pass results', () => {
@@ -107,7 +108,7 @@ describe('planner: selection, display limit and diagnosis', () => {
   av.periods = { morning: { startMin: 0, endMin: 480 }, midday: { startMin: 480, endMin: 960 }, evening: { startMin: 960, endMin: 1440 } };
   const plan = (passes: ReturnType<typeof geom>[], selectedNoradIds: number[], minElevationDeg = 40) =>
     computePlan(
-      { observer: { latDeg: 0, lonDeg: 0, heightKm: 0 }, timeZone: 'UTC', criteria: { minElevationDeg, maxSpanMin: 150, minOpportunities: 1 }, availability: av, range: { start: at(-120), end: at(3000) }, selectedNoradIds },
+      { observer: { latDeg: 0, lonDeg: 0, heightKm: 0 }, timeZone: 'UTC', criteria: { minElevationDeg, maxSpanMin: 150, minOpportunities: 1 }, availability: av, range: { start: at(-120), end: at(3000) }, selectedNoradIds, sortBy: 'elevation' },
       { elements: elementsFixture, status }, passes, [], [], T0,
     );
 
@@ -125,7 +126,7 @@ describe('planner: selection, display limit and diagnosis', () => {
     expect(result.windows).toHaveLength(SINGLE_PASS_RESULT_LIMIT);
     const elevations = result.windows.map((w) => w.counted[0]!.fullMaxElevationDeg);
     expect(elevations).toEqual([...elevations].sort((a, b) => b - a)); // highest first through the whole list
-    expect(findSinglePasses(result.assessments, result.availabilityIntervals)).toHaveLength(SINGLE_PASS_RESULT_LIMIT + 20);
+    expect(findSinglePasses(result.assessments, result.availabilityIntervals, 'elevation')).toHaveLength(SINGLE_PASS_RESULT_LIMIT + 20);
   });
   it('cluster mode is unchanged: windowsTotal equals the clusters shown', () => {
     const passes = [geom({ norad: 27607, rise: 56, set: 68, maxEl: 70 }), geom({ norad: 25544, rise: 96, set: 109, maxEl: 80 })];

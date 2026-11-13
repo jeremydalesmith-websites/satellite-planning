@@ -10,8 +10,8 @@ passes are counted, the policy constants, the data sources and the limits.
 In scope: FM repeaters only, cross-band 2 m / 70 cm, both V/U and U/V; location,
 timezone, date range (default 28 days, max 42), minimum peak elevation
 (default 40°), maximum cluster span (2 / 2.5 / 3 h), minimum passes (default 3,
-1 to 10; 1 = single-pass mode, where each qualifying pass is its own result ranked by maximum elevation and the maximum span is hidden), weekly Sun–Sat × Morning/Midday/Evening availability; cluster
-finder and ranking; saved events re-checked against fresh data.
+1 to 10; 1 = single-pass mode, where each qualifying pass is its own result and the maximum span is hidden), weekly Sun–Sat × Morning/Midday/Evening availability; cluster
+finder and user-selected sorting (Date default, Elevation, Pass count); saved events re-checked against fresh data.
 
 Out of scope (deferred): SSTV, linear transponders, packet/APRS/telemetry/beacon
 activities, mutual visibility, live tracking/globes/ground tracks, Doppler,
@@ -106,6 +106,13 @@ Independent prediction validation: see `docs/VALIDATION.md` (needs Python).
 * Install with `npm ci` (locked versions), not `npm install`, unless changing dependencies.
 * AMSAT status reports are matched to the exact `_[FM]` entry; other modes and beacon-only
   reports must never establish repeater availability (see README).
+
+## Sorting and freshness
+* Sorting (`src/cluster/cluster.ts`) only orders results; it must never change qualification or feasibility, and is applied
+  to the complete candidate list BEFORE the display limit. Elevation scores a cluster by its lowest usable maximum
+  elevation; candidate generation keeps the (passes, lowest elevation) frontier so the best result is never pruned.
+* The results line "Keplers updated ... · Activity reports updated ..." is retrieval time (successful download), not an
+  element epoch or a report time, and never implies a live check. A failed download must never advance a timestamp.
 
 ## Privacy
 Treat the owner's identity and location as private. Do not put personal details

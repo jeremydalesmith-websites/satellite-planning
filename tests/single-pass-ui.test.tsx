@@ -94,43 +94,46 @@ describe('Maximum span is hidden when there is no cluster to constrain', () => {
 });
 
 describe('results: single-pass wording and order', () => {
-  it('heading, hint and cards use "qualifying pass(es)" and singular wording, ranked by elevation', () => {
+  it('heading says "N results", cards use singular wording, and Date order is the default', () => {
     const { container } = show(1);
-    expect(screen.getByRole('heading', { level: 2, name: '3 qualifying passes' })).toBeTruthy();
-    const hint = container.querySelector('.hint')!.textContent!;
-    expect(hint).toMatch(/Single passes reaching a peak of 40° or higher/);
-    expect(hint).toMatch(/ranked by maximum elevation \(highest first; earlier first on a tie\)/);
-    expect(hint).not.toMatch(/Clusters|maximum span/i);
+    expect(screen.getByRole('heading', { level: 2, name: '3 results' })).toBeTruthy();
+    expect(container.querySelector('.hint:not(.small)')).toBeNull(); // no requirements paragraph, no satellites list
+    expect(container.textContent).not.toMatch(/Satellites considered|ranked by maximum elevation|maximum span/i);
     const summaries = [...container.querySelectorAll('.event .summary')].map((s) => s.textContent!.trim());
     expect(summaries).toEqual(['1 qualifying pass', '1 qualifying pass', '1 qualifying pass']); // singular, no satellite count
     const order = [...container.querySelectorAll('.event article.pass h4')].map((h) => h.textContent);
+    expect(order).toEqual(['SO-50', 'ISS', 'SO-50']); // soonest first: 62°, 88°, 75°
+  });
+  it('Elevation order puts the highest first; Pass count is not offered for single passes', () => {
+    const { container } = render(<Results inputs={inputs(1)} result={computePlan({ ...inputs(1), sortBy: 'elevation' }, { elements: elementsFixture, status }, passes(), [], [], T0)} nowMs={T0} isSaved={() => false} onSave={() => {}} statusProblem={null} sortBy="elevation" />);
+    const order = [...container.querySelectorAll('.event article.pass h4')].map((h) => h.textContent);
     expect(order).toEqual(['ISS', 'SO-50', 'SO-50']); // 88°, 75°, 62°
-    const elev = [...container.querySelectorAll('.event article.pass dl.key > div:nth-child(3) dd')].map((d) => parseInt(d.textContent!, 10));
-    expect(elev).toEqual([88, 75, 62]);
+    const options = [...container.querySelectorAll('.sort-by option')].map((o) => o.textContent);
+    expect(options).toEqual(['Date', 'Elevation']);
   });
   it('one result reads "1 qualifying pass" in the heading too', () => {
     const one = computePlan({ ...inputs(1), criteria: { ...inputs(1).criteria, minElevationDeg: 80 } }, { elements: elementsFixture, status }, passes(), [], [], T0);
     show(1, one);
-    expect(screen.getByRole('heading', { level: 2, name: '1 qualifying pass' })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: '1 result' })).toBeTruthy();
   });
   it('says how many exist when the display limit cuts the list', () => {
     const r = planFor(1);
     show(1, { ...r, windowsTotal: 150 });
-    expect(screen.getByRole('heading', { level: 2, name: '150 qualifying passes' })).toBeTruthy();
-    expect(screen.getByText(/Showing the highest 3 of 150/)).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: '150 results' })).toBeTruthy();
+    expect(screen.getByText(/Showing the first 3 of 150 in this order/)).toBeTruthy();
   });
   it('an empty single-pass result explains itself without cluster wording', () => {
     const none = computePlan({ ...inputs(1), criteria: { ...inputs(1).criteria, minElevationDeg: 85 } }, { elements: elementsFixture, status }, [geom({ norad: 27607, rise: 56, set: 68, maxEl: 60 })], [], [], T0);
     expect(none.windows).toEqual([]);
     const { container } = show(1, none, 85);
-    expect(screen.getByRole('heading', { level: 2, name: 'No qualifying passes' })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: 'No results' })).toBeTruthy();
     expect(container.querySelector('.no-results')!.textContent).toMatch(/No pass of a selected, eligible satellite reaches a peak of 85°/);
     expect(container.textContent).not.toMatch(/cluster/i);
   });
-  it('2 or more minimum passes keeps the cluster wording and satellite count', () => {
+  it('2 or more minimum passes keeps the satellite count and offers Pass count', () => {
     const { container } = show(2);
-    expect(screen.getByRole('heading', { level: 2 }).textContent).toMatch(/promising event window/);
-    expect(container.querySelector('.hint')!.textContent).toMatch(/Clusters of at least 2 separate passes/);
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toMatch(/^\d+ results?$/);
+    expect([...container.querySelectorAll('.sort-by option')].map((o) => o.textContent)).toEqual(['Date', 'Elevation', 'Pass count']);
     expect(container.querySelector('.event .summary')!.textContent).toMatch(/3 qualifying passes\s*·\s*2 satellites/); // all three passes fit one cluster
   });
 });
@@ -153,15 +156,15 @@ describe('Weekend shortcut', () => {
     return a;
   };
 
-  it('sits at the top of the grid header, directly above the per-day controls, as a non-submit button', () => {
+  it('sits below the grid after Check all and Uncheck all, as a same-styled non-submit button', () => {
     const { container } = render(<AvailabilityGrid value={emptyAvailability()} onChange={() => {}} />);
     const btn = screen.getByRole('button', { name: 'Weekend' });
     expect(btn.getAttribute('type')).toBe('button');
-    const head = container.querySelector('table.grid thead')!;
-    expect(head.contains(btn)).toBe(true);
-    expect(head.querySelectorAll('button.day-btn')).toHaveLength(7);
-    const dayRow = head.querySelector('button.day-btn')!.closest('tr')!;
-    expect(btn.closest('tr')!.compareDocumentPosition(dayRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // Weekend row comes first
+    expect(container.querySelector('table.grid')!.contains(btn)).toBe(false); // no longer in the header above the day controls
+    const actions = container.querySelector('.grid-actions')!;
+    expect([...actions.querySelectorAll('button')].map((x) => x.textContent)).toEqual(['Check all', 'Uncheck all', 'Weekend']);
+    expect(btn.className).toBe(actions.querySelector('button')!.className); // same styling as its neighbours
+    expect(container.querySelector('.weekend-row, .weekend-btn')).toBeNull();
   });
   it('selects Saturday and Sunday in all three periods and clears Monday to Friday, leaving the time ranges alone', async () => {
     const onChange = vi.fn();
@@ -185,14 +188,9 @@ describe('Weekend shortcut', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Weekend' }));
     expect(onChange.mock.calls[1]![0]).toEqual(once);
   });
-  it('shows a pressed state only while the selection is exactly the weekend', () => {
-    const wk = emptyAvailability();
-    for (const p of ['morning', 'midday', 'evening'] as const) { wk.selected[p][0] = true; wk.selected[p][6] = true; }
-    const { rerender } = render(<AvailabilityGrid value={wk} onChange={() => {}} />);
-    expect(screen.getByRole('button', { name: 'Weekend' }).getAttribute('aria-pressed')).toBe('true');
-    wk.selected.midday[3] = true; // add a Wednesday
-    rerender(<AvailabilityGrid value={{ ...wk }} onChange={() => {}} />);
-    expect(screen.getByRole('button', { name: 'Weekend' }).getAttribute('aria-pressed')).toBe('false');
+  it('is a plain action button like its neighbours (no pressed state)', () => {
+    render(<AvailabilityGrid value={emptyAvailability()} onChange={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Weekend' }).hasAttribute('aria-pressed')).toBe(false);
   });
   it('in the plan form: no search, persisted, dates and time ranges unchanged, individual boxes still editable', async () => {
     const onSearch = vi.fn();

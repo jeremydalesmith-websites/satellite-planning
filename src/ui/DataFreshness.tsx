@@ -27,7 +27,7 @@ export function DataFreshness({ orbitalDownloadedAt, epochs, statusDownloadedAt,
   return (
     <dl className="fresh" aria-label="Data and timing">
       <div>
-        <dt>Orbital data downloaded</dt>
+        <dt>Keplers downloaded</dt>
         <dd>{z(Date.parse(orbitalDownloadedAt))}</dd>
       </div>
       <div>
@@ -35,7 +35,7 @@ export function DataFreshness({ orbitalDownloadedAt, epochs, statusDownloadedAt,
         <dd>{oldest !== null && newest !== null ? (oldest === newest ? z(oldest) : `${z(oldest)} to ${z(newest)}`) : 'n/a'}</dd>
       </div>
       <div>
-        <dt>Status reports downloaded</dt>
+        <dt>Activity reports downloaded</dt>
         <dd>{statusDownloadedAt ? z(Date.parse(statusDownloadedAt)) : 'unavailable: no satellite can be confirmed'}</dd>
       </div>
       <div>

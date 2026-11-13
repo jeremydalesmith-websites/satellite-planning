@@ -34,11 +34,11 @@ describe('results lead straight into the event cards', () => {
     const { container } = renderResults(T0);
     const text = container.textContent ?? '';
     expect(result.windows.length).toBeGreaterThan(0);
-    for (const label of ['Orbital data downloaded', 'Orbital elements dated', 'Status reports downloaded', 'Eligibility last checked', 'Eligibility checked', 'Predictions calculated', 'Data freshness']) {
+    for (const label of ['Keplers downloaded', 'Orbital elements dated', 'Activity reports downloaded', 'Eligibility last checked', 'Eligibility checked', 'Predictions calculated', 'Data freshness']) {
       expect(text).not.toContain(label);
     }
     expect(container.querySelector('dl.fresh')).toBeNull();
-    expect(screen.getByRole('heading', { level: 2 }).textContent).toMatch(/qualifying pass/); // this fixture uses 1 minimum pass: single-pass mode
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('1 result'); // this fixture uses 1 minimum pass: single-pass mode
   });
   it('does not repeat a provisional-planning paragraph on any event card (the one note lives in the footer)', () => {
     const { container } = renderResults(T0);
@@ -56,8 +56,8 @@ describe('results lead straight into the event cards', () => {
 describe('actionable warnings are preserved', () => {
   it('warns when the STATUS data is old (judged from the status download time, not the orbital download)', () => {
     renderResults(T0 + 10 * 86_400_000); // status was downloaded at T0
-    expect(screen.getByText(/Status updated 10 days ago/)).toBeTruthy();
-    expect(screen.getByText(/older than 72 hours cannot qualify a satellite/)).toBeTruthy();
+    expect(screen.getByText(/Activity reports updated 10 days ago/)).toBeTruthy();
+    expect(screen.getByText(/over 72 hours old and cannot qualify a satellite/)).toBeTruthy();
   });
   it('shows the status-data-unavailable message', () => {
     renderResults(T0, 'Operating-status data is unavailable (HTTP 500). No satellite can be confirmed eligible without it, so none will be planned.');
@@ -84,7 +84,7 @@ describe('the footer data block', () => {
       />,
     );
     const text = container.textContent ?? '';
-    for (const label of ['Orbital data downloaded', 'Orbital elements dated (epoch)', 'Status reports downloaded', 'Eligibility last checked', 'Predictions calculated']) {
+    for (const label of ['Keplers downloaded', 'Orbital elements dated (epoch)', 'Activity reports downloaded', 'Eligibility last checked', 'Predictions calculated']) {
       expect(text).toContain(label);
     }
     expect(text).toContain('nothing is re-downloaded by searching');

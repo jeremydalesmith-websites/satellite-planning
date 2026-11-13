@@ -13,7 +13,7 @@
 import { ACTIVITIES } from './catalog/catalog.ts';
 import type { FmActivity } from './catalog/catalog.ts';
 import type { ElementsFile, StatusFile } from './data/ingest.ts';
-import { EVENT_DURATIONS_MIN, MAX_ELEMENT_AGE_DAYS, MIN_ELEVATION_INPUT_DEG, SINGLE_PASS_RESULT_LIMIT } from './domain/policy.ts';
+import { EVENT_DURATIONS_MIN, MAX_ELEMENT_AGE_DAYS, MIN_ELEVATION_INPUT_DEG } from './domain/policy.ts';
 import type { Criteria, ElementSet, Interval, Ms, Observer, PassGeometry } from './domain/types.ts';
 import { expandAvailability } from './availability/availability.ts';
 import type { AvailabilitySettings } from './availability/availability.ts';
@@ -23,7 +23,8 @@ import { classifyStatus } from './eligibility/status.ts';
 import { consideredIds, evaluateEligibility } from './eligibility/eligibility.ts';
 import type { SatelliteEligibility } from './eligibility/eligibility.ts';
 import type { OperationalStatus } from './eligibility/status.ts';
-import { findEventWindows, findSinglePasses } from './cluster/cluster.ts';
+import { findEventWindows, rankResults } from './cluster/cluster.ts';
+import type { SortBy } from './cluster/cluster.ts';
 import type { EventWindow } from './cluster/cluster.ts';
 
 export interface LoadedData {
@@ -131,6 +132,8 @@ export interface PlanInputs {
    * undefined = the defaults (ISS, SO-50, AO-91).
    */
   selectedNoradIds?: readonly number[];
+  /** Result order (default Date). The sort never changes which results exist, only their order. */
+  sortBy?: SortBy;
 }
 
 export interface PlanResult {
@@ -139,7 +142,7 @@ export interface PlanResult {
   /** Satellites that were both eligible and selected, i.e. the only ones that can appear below. */
   consideredNoradIds: number[];
   windows: EventWindow[];
-  /** How many results exist before the display limit (only differs from windows.length in single-pass mode). */
+  /** How many results exist before the display limit (windows holds the first N of the chosen sort). */
   windowsTotal: number;
   assessments: PassAssessment[];
   availabilityIntervals: Interval[];
@@ -178,9 +181,7 @@ export function computePlan(
   const planned = passes.filter((p) => considered.has(p.noradId));
   const assessments = assessAll(planned, statuses, criteria.minElevationDeg);
   const availabilityIntervals = range.end > range.start ? expandAvailability(inputs.availability, inputs.timeZone, range) : [];
-  const singlePass = criteria.minOpportunities <= 1;
-  const everyPass = singlePass ? findSinglePasses(assessments, availabilityIntervals) : null;
-  const windows = everyPass ? everyPass.slice(0, SINGLE_PASS_RESULT_LIMIT) : findEventWindows(assessments, availabilityIntervals, criteria);
+  const { windows, windowsTotal } = rankResults(assessments, availabilityIntervals, { ...criteria, sort: inputs.sortBy });
   const diagnosis =
     windows.length === 0
       ? diagnose(effective, planned, statuses, assessments, availabilityIntervals)
@@ -189,7 +190,7 @@ export function computePlan(
     eligibility,
     consideredNoradIds: [...considered],
     windows,
-    windowsTotal: everyPass ? everyPass.length : windows.length,
+    windowsTotal,
     assessments,
     availabilityIntervals,
     skipped: skipped.filter((s) => considered.has(s.noradId)),

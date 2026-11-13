@@ -131,7 +131,7 @@ summary { cursor: pointer; padding: 8px 0; min-height: 44px; font-weight: 600; }
 .notes { font-size: .85rem; margin: 4px 0 0; padding-left: 18px; color: var(--muted); }
 
 /* timeline */
-.timeline { position: relative; margin: 12px 0 4px; padding-top: 22px; }
+.timeline { position: relative; margin: 12px 0 4px; padding-top: 22px; overflow-x: clip; } /* a label beside a pass at the very end of the timeline must not widen the page */
 .tl-axis { position: absolute; top: 0; left: 0; right: 0; height: 20px; }
 .tick { position: absolute; transform: translateX(-50%); font-size: .7rem; color: var(--muted); white-space: nowrap; }
 .tick i { display: block; width: 1px; height: 5px; background: var(--border); margin: 0 auto 1px; }
@@ -227,6 +227,12 @@ footer .fresh { margin-top: 6px; }
 }
 
 /* Weekend shortcut: its own row at the top of the grid header, directly above the per-day controls */
-.weekend-row { text-align: left !important; padding: 0 0 6px !important; }
-.weekend-btn { min-height: 30px; padding: 2px 8px; font-size: .78rem; line-height: 1.1; }
-.weekend-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+
+/* Results introduction: count, Sort by and freshness read as one group, 32 px below the search panel. */
+.results { margin-top: 32px; }
+.results-intro { margin: 0 0 12px; }
+.results-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.results-head h2 { margin: 0; }
+.sort-by { display: inline-flex; align-items: center; gap: 8px; font-size: .95rem; }
+.sort-by select { min-height: 36px; font: inherit; padding: 4px 8px; }
+.freshness { margin: 4px 0 0; color: var(--muted); font-size: .9rem; }

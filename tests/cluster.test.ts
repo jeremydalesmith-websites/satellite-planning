@@ -183,26 +183,24 @@ describe('status gating of the minimum', () => {
   });
 });
 
-describe('ranking', () => {
+describe('ranking (Date is the default sort)', () => {
   const day = 24 * 60;
-  it('ranks by count, then total operating time, then elevations, then earlier start', () => {
+  it('defaults to the soonest start first, then more passes', () => {
     const four = [P(10, 20), P(40, 50), P(70, 80), P(100, 110)];
-    const threeLong = [P(day + 10, day + 30), P(day + 50, day + 70), P(day + 90, day + 110)];
-    const threeHigh = [P(2 * day + 10, 2 * day + 20, 85), P(2 * day + 40, 2 * day + 50, 85), P(2 * day + 70, 2 * day + 80, 85)];
-    const w = find([...threeHigh, ...threeLong, ...four], [iv(0, 600), iv(day, day + 600), iv(2 * day, 2 * day + 600)], 3);
-    expect(w[0]!.counted).toHaveLength(4); // most passes first
-    expect(w[1]!.window.start).toBe(at(day + 10)); // then 3 passes with the most operating time (3 x 20 min)
-    expect(w[1]!.totalOperatingMs).toBeGreaterThan(w[2]!.totalOperatingMs);
-    expect(w[2]!.window.start).toBe(at(2 * day + 10)); // then equal time (3 x 10 min): higher summed elevations beat the lower ones
-    // the 4-pass block's shorter 3-pass sets are distinct clusters and are kept, ranked below
-    expect(w.filter((x) => x.counted.length === 3).length).toBeGreaterThanOrEqual(4);
+    const threeLater = [P(day + 10, day + 30), P(day + 50, day + 70), P(day + 90, day + 110)];
+    const w = find([...threeLater, ...four], [iv(0, 600), iv(day, day + 600)], 3);
+    expect(w[0]!.window.start).toBe(at(10));
+    expect(w[0]!.counted).toHaveLength(4); // same start: the larger set first
+    const starts = w.map((x) => x.window.start);
+    expect(starts).toEqual([...starts].sort((x, y) => x - y));
   });
-  it('equal count and time: higher elevations win, then the earlier start', () => {
-    const w = find([P(10, 20, 50), P(30, 40, 50), P(day + 10, day + 20, 80), P(day + 30, day + 40, 80)], [iv(0, 600), iv(day, day + 600)], 2);
-    expect(w[0]!.window.start).toBe(at(day + 10)); // 160° beats 100°
-    const same = find([P(10, 20, 50), P(30, 40, 50), P(day + 10, day + 20, 50), P(day + 30, day + 40, 50)], [iv(0, 600), iv(day, day + 600)], 2);
-    expect(same[0]!.window.start).toBe(at(10)); // identical scores: earlier start
+  it('the shorter 3-pass sets inside a 4-pass block are distinct clusters and are kept', () => {
+    const w = find([P(10, 20), P(40, 50), P(70, 80), P(100, 110)], block(0, 600), 3);
+    expect(w.filter((x) => x.counted.length === 3).length).toBeGreaterThanOrEqual(2);
   });
+});
+
+describe('minimum passes', () => {
   it('the minimum is honoured, including 2', () => {
     expect(find([P(10, 20), P(60, 70)], block(0, 600), 2)).toHaveLength(1);
     expect(find([P(10, 20), P(60, 70)], block(0, 600), 3)).toEqual([]);

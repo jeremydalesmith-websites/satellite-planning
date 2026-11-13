@@ -38,8 +38,8 @@ nothing is sent anywhere.
 **About the data.** `npm start` downloads the current public data from AMSAT **once, at startup**: the orbital elements
 and the recent repeater status reports. **Leaving the app running does not refresh that data automatically**, and
 neither does pressing Search. To get newer data, stop the app (Ctrl+C) and run `npm start` again (or run
-`npm run refresh-data` in a second terminal and reload the page). The page shows how old the status reports are
-("Status updated 3 hours ago") and warns when they are more than a day old. Because a satellite only counts if its FM
+`npm run refresh-data` in a second terminal and reload the page). The page shows how old both downloads are
+("Keplers updated 3 hours ago · Activity reports updated 3 hours ago") and warns when the activity reports are more than a day old. Because a satellite only counts if its FM
 repeater was reported working in the last 72 hours, stale data quietly means fewer (eventually zero) eligible satellites.
 
 **Windows PowerShell:** if `npm` fails with "running scripts is disabled on this system", either use Command Prompt
@@ -220,8 +220,12 @@ cross-origin requests to AMSAT, no CORS dependence). A future workflow is intend
 * Orbital elements fail to download or validate → the script exits with an error
   and writes nothing. (In the planned workflow this keeps the previous
   deployment live.)
-* Status reports fail → orbital data is still written, and every repeater is
-  shown as "unconfirmed"; nothing is guessed.
+* Status is **all-or-nothing**: it is written only when every repeater entry downloaded and parsed. If any request
+  fails, `status.json` is not touched; a previous file stays in place with its own (older) download time, and with
+  none every repeater is "unconfirmed". Nothing is guessed, and a timestamp is never advanced by a failed download.
+* `--strict` (`npm run refresh-data:strict`, for automation): any status failure exits 1 and **nothing** is written.
+  `npm run validate-data` then checks structure, freshness (downloaded within 3 hours), the catalog being complete, no
+  failed entries and at least some reports, before anything is published.
 
 The status API asks clients to identify themselves and poll at most every 5
 minutes; the job sends a descriptive User-Agent and makes one spaced request
@@ -252,7 +256,7 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
   satellite. Any penumbra counts as not lit. Only AO-91 is flagged
   sunlight-dependent, because AMSAT's FM page asks for no use in eclipse.
 * **Single-pass mode (Minimum passes = 1).** There is no cluster to build, so every qualifying pass is its own result,
-  ranked by maximum elevation (highest first; the earlier pass wins a tie). A sunlight-limited pass is ranked by the
+  sorted as chosen (see **Sorting** below; Date by default). A sunlight-limited pass is ordered by the
   elevation it can be operated at, not by a peak in shadow. The maximum span is hidden, because it has nothing to
   constrain. Every other rule is unchanged: selection by peak elevation (including 60° and higher), sunlight, strict
   eligibility, the satellite selection, and the whole pass lying inside one availability block. Up to 100 passes are
@@ -265,7 +269,7 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
   pass shows its own "Duration".
 * **Maximum span.** The selected 2 / 2.5 / 3 hours is a *limit*, not a required or padded event length:
   a 20-minute cluster qualifies for a two-hour maximum. The cluster's span (AOS to LOS) must not exceed it.
-* **Availability.** (A **Weekend** shortcut in the grid header selects Saturday and Sunday in all three periods and clears Monday to Friday; it changes nothing else.) The whole AOS-to-LOS cluster must lie inside one merged availability block (Midday +
+* **Availability.** (A **Weekend** shortcut, beside Check all and Uncheck all below the grid, selects Saturday and Sunday in all three periods and clears Monday to Friday; it changes nothing else.) The whole AOS-to-LOS cluster must lie inside one merged availability block (Midday +
   Evening merge into one block). A pass that begins before or ends after the block does not count, even if
   its peak is inside. Period boundaries are local wall-clock times in the selected zone, converted per day with
   Luxon, so DST is handled. A boundary that falls in the repeated hour of a fall-back day takes the earlier instant,
@@ -281,10 +285,22 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
   overlap), then higher summed peak elevations. Overlapping qualifying passes inside the cluster are shown as
   *alternatives*, not as independent opportunities. This is deliberately conservative: it can count fewer
   passes than an operator who works two low-elevation tails could manage.
-* **Ranking:** (1) number of passes, (2) total permitted operating time, (3) sum of maximum elevations,
-  (4) earlier start. There is no opaque score. Clusters with exactly the same counted passes appear once.
-  Distinct sets are all kept: a shorter cluster with fewer passes is a separate result next to a longer one.
-  At most 25 clusters are shown.
+* **Sorting.** A compact "Sort by" control beside the result count orders the results. It never changes which results
+  exist or whether a cluster is feasible; it only changes the order. There is no opaque score.
+  * **Date** (default, single passes and clusters): soonest start first.
+  * **Elevation**: highest first. A single pass is scored by the maximum elevation it reaches while operation is
+    permitted (for a sunlight-dependent satellite, the elevation during a sunlit portion). A cluster is scored by the
+    LOWEST of those values among its counted passes ("consistently high": a pair of 80° and 75° passes scores 75°).
+  * **Pass count** (clusters only; not offered for single passes): most counted passes first.
+  * Elevation and Pass count break ties by the earlier start. Remaining ties fall to the other keys, then to the
+    pass identifiers, so the order is total and repeatable.
+  The sort is applied to the **complete** list **before** the display limit (25 clusters, 100 single passes), so the
+  limit always keeps the true first N of the chosen order, and the page says "Showing the first N of M in this order"
+  when it cuts the list. To make that true for Elevation, candidate generation keeps, for each possible window, every
+  distinct counted set on the frontier of (number of passes, lowest elevation): the biggest set, and each smaller set
+  whose lowest elevation is strictly higher. A count-first search alone would have hidden, for example, the pair of 80° and 75°
+  passes behind a three-pass set that contains a 45° pass. Clusters with exactly the same counted passes appear once;
+  distinct sets are all kept.
 * **Saved events.** A new event stores the actual cluster interval from its header and is re-checked against
   that fixed interval (`schema: 2`). A pass that drifts so its full pass crosses the saved edge is flagged,
   not followed. A new event also stores the satellites that were selected when it was saved, and re-checks consider only
@@ -320,10 +336,13 @@ CelesTrak was not used (it was not reachable from the development sandbox); AMSA
   affects results. Your choice is stored exactly as you made it (in this browser): a satellite that is
   temporarily ineligible stays selected and returns by itself when it qualifies again, and one you
   unchecked is never re-selected for you.
-* **Status age.** A compact line beside the results says how old the status reports are ("Status updated 2 hours
-  ago."), judged from when the *status* was downloaded (not the orbital data). It becomes a warning after 24 hours
-  (reports filed since the download are not included) and states plainly after 72 hours that nothing can qualify.
-  Missing status data is called out; the full timestamps stay in the collapsed footer.
+* **Freshness.** One muted line under the result count reads "Keplers updated N hours ago · Activity reports updated N
+  hours ago". *Keplers* is the last successful orbital-data download and *Activity reports* the last successful
+  status download; they are kept separate because they can differ. They describe when the data was **retrieved**, not
+  the epoch of any element set nor the time of any individual report, and they are not a live operational check. The
+  warnings are judged from the activity-report time only: after 24 hours "newer reports are not included", after 72
+  hours "cannot qualify a satellite". A failed download never advances a timestamp (the old file keeps its old time).
+  Missing activity reports are called out; the full timestamps stay in the collapsed footer.
 * **Checking vs downloading.** Searching or opening saved events *re-checks the existing reports
   against the current time* (one time snapshot per search or re-check). It does **not** download new
   reports; the page shows when the reports were downloaded (by `npm run refresh-data` / `npm start`) and

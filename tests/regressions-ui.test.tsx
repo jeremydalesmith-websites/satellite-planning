@@ -129,55 +129,60 @@ describe('finding 7: a malformed status file fails closed with an understandable
   });
 });
 
-describe('data freshness: a compact status-age indicator, judged from the STATUS download time', () => {
+describe('data freshness: "Keplers updated ... · Activity reports updated ..." (retrieval times, judged separately)', () => {
   const planWith = (statusDownloadedMs: number | null, elementsDownloadedMs = T0) =>
     computePlan(inputs, { elements: { ...elementsFixture, downloadedAt: new Date(elementsDownloadedMs).toISOString() }, status: statusDownloadedMs === null ? null : status(statusDownloadedMs) },
       [geom({ norad: 27607, rise: 56, set: 68, maxEl: 70 }), geom({ norad: 25544, rise: 96, set: 109, maxEl: 50 })], [], [], T0);
   const show = (p: ReturnType<typeof planWith>, nowMs: number, statusProblem: string | null = null) =>
     render(<Results inputs={inputs} result={p} nowMs={nowMs} isSaved={() => false} onSave={() => {}} statusProblem={statusProblem} />);
   const H = 3_600_000;
+  const line = (c: HTMLElement) => c.querySelector('.freshness')!.textContent;
 
-  it('shows "Status updated 2 hours ago." as a small hint, not a warning, and no metadata box', () => {
-    const { container } = show(planWith(T0 - 2 * H), T0);
-    expect(container.querySelector('.status-age')!.textContent).toBe('Status updated 2 hours ago.');
+  it('shows both retrieval ages on one muted line, not a warning, and no metadata box', () => {
+    const { container } = show(planWith(T0 - 2 * H, T0 - 2 * H), T0);
+    expect(line(container)).toBe('Keplers updated 2 hours ago · Activity reports updated 2 hours ago');
     expect(container.querySelector('.notice.warn')).toBeNull();
     expect(container.querySelector('dl.fresh')).toBeNull();
-    for (const label of ['Orbital data downloaded', 'Eligibility last checked', 'Predictions calculated']) expect(container.textContent).not.toContain(label);
+    for (const label of ['Keplers downloaded', 'Eligibility last checked', 'Predictions calculated']) expect(container.textContent).not.toContain(label);
+  });
+  it('keeps the two timestamps separate when they differ', () => {
+    const { container } = show(planWith(T0 - 1 * H, T0 - 5 * H), T0);
+    expect(line(container)).toBe('Keplers updated 5 hours ago · Activity reports updated 1 hour ago');
   });
   it('wording: just now, minutes, singular hour', () => {
-    expect(show(planWith(T0), T0).container.querySelector('.status-age')!.textContent).toBe('Status updated just now.');
+    expect(line(show(planWith(T0, T0), T0).container)).toBe('Keplers updated just now · Activity reports updated just now');
     cleanup();
-    expect(show(planWith(T0 - 5 * 60_000), T0).container.querySelector('.status-age')!.textContent).toBe('Status updated 5 minutes ago.');
-    cleanup();
-    expect(show(planWith(T0 - 1 * H), T0).container.querySelector('.status-age')!.textContent).toBe('Status updated 1 hour ago.');
+    expect(line(show(planWith(T0 - 5 * 60_000, T0), T0).container)).toBe('Keplers updated just now · Activity reports updated 5 minutes ago');
   });
-  it('turns into a warning after 24 hours: newer reports are not included', () => {
+  it('after 24 hours the activity reports give a concise warning (newer reports are not included)', () => {
     const { container } = show(planWith(T0 - 30 * H), T0);
     const warn = container.querySelector('.notice.warn')!;
-    expect(warn.textContent).toMatch(/Status updated 30 hours ago/);
-    expect(warn.textContent).toMatch(/Reports filed since then are not included/);
-    expect(container.querySelector('.status-age')).toBeNull(); // not shown twice
+    expect(warn.textContent).toMatch(/Activity reports are over 24 hours old/);
+    expect(warn.textContent).toMatch(/newer reports are not included/);
+    expect(line(container)).toContain('Activity reports updated 30 hours ago');
   });
   it('beyond 72 hours it says plainly that nothing can qualify', () => {
     const { container } = show(planWith(T0 - 5 * 24 * H), T0);
-    expect(container.querySelector('.notice.warn')!.textContent).toMatch(/Status updated 5 days ago.*older than 72 hours cannot qualify a satellite/);
+    expect(container.querySelector('.notice.warn')!.textContent).toMatch(/over 72 hours old and cannot qualify a satellite/);
   });
-  it('is judged from the STATUS download time: old orbital data with fresh status gives no status warning', () => {
+  it('is judged from the STATUS download time: old Keplers with fresh reports give no status warning', () => {
     const { container } = show(planWith(T0 - 1 * H, T0 - 10 * 24 * H), T0);
     expect(container.querySelector('.notice.warn')).toBeNull();
-    expect(container.querySelector('.status-age')!.textContent).toBe('Status updated 1 hour ago.');
+    expect(line(container)).toBe('Keplers updated 10 days ago · Activity reports updated 1 hour ago');
   });
-  it('and old status with fresh orbital data does warn', () => {
-    const { container } = show(planWith(T0 - 40 * H, T0), T0);
-    expect(container.querySelector('.notice.warn')).not.toBeNull();
+  it('and old status with fresh Keplers does warn', () => {
+    expect(show(planWith(T0 - 40 * H, T0), T0).container.querySelector('.notice.warn')).not.toBeNull();
   });
-  it('missing status is clear without a duplicate: one compact line, or the load problem alone', () => {
+  it('does not imply a live check: it says "updated", never "checked" or "live"', () => {
+    const { container } = show(planWith(T0 - 2 * H), T0);
+    expect(line(container)).not.toMatch(/checked|live|current status/i);
+  });
+  it('missing status: the freshness line says so; the load problem is shown once', () => {
     const none = planWith(null);
-    expect(show(none, T0).container.querySelector('.status-age')!.textContent).toBe('Status data unavailable.');
+    expect(line(show(none, T0).container)).toBe('Keplers updated just now · Activity reports unavailable');
     cleanup();
     const withProblem = show(none, T0, 'Operating-status data is unavailable (HTTP 404). No satellite can be confirmed eligible without it, so none will be planned.');
-    expect(withProblem.container.querySelector('.status-age')).toBeNull();
-    expect(withProblem.container.textContent).toMatch(/Operating-status data is unavailable \(HTTP 404\)/);
+    expect(withProblem.container.textContent!.match(/Operating-status data is unavailable \(HTTP 404\)/g)).toHaveLength(1);
   });
 });
 

@@ -43,7 +43,6 @@ export function AvailabilityGrid({ value, onChange, invalid, describedBy }: Prop
     for (const p of PERIOD_IDS) selected[p] = value.selected[p].map((_, d) => isWeekend(d));
     onChange({ ...value, selected });
   };
-  const weekendOnly = PERIOD_IDS.every((p) => value.selected[p].every((on, d) => on === isWeekend(d)));
   const toggleDay = (d: number) => {
     const all = PERIOD_IDS.every((p) => value.selected[p][d]);
     const selected = { ...value.selected };
@@ -83,14 +82,6 @@ export function AvailabilityGrid({ value, onChange, invalid, describedBy }: Prop
       <table className="grid">
         <caption className="sr-only">Weekly availability. Each checkbox is one day and time period.</caption>
         <thead>
-          {/* The Weekend shortcut has its own row above the day controls: the first column is far too narrow on phones to hold it. */}
-          <tr>
-            <td colSpan={8} className="weekend-row">
-              <button type="button" className="weekend-btn" onClick={setWeekend} aria-pressed={weekendOnly} title="Select Saturday and Sunday, clear Monday to Friday">
-                Weekend
-              </button>
-            </td>
-          </tr>
           <tr>
             <td />
             {WEEKDAY_LABELS.map((d, i) => (
@@ -127,6 +118,7 @@ export function AvailabilityGrid({ value, onChange, invalid, describedBy }: Prop
       <div className="grid-actions">
         <button type="button" onClick={() => setAll(true)}>Check all</button>
         <button type="button" onClick={() => setAll(false)}>Uncheck all</button>
+        <button type="button" onClick={setWeekend} title="Select Saturday and Sunday, clear Monday to Friday">Weekend</button>
       </div>
     </fieldset>
   );

@@ -155,13 +155,13 @@ describe('timeline scales to the actual cluster', () => {
   });
 });
 
-describe('results wording', () => {
-  it('describes a maximum span, not a required event length', () => {
+describe('results introduction', () => {
+  it('is the count and the sort control only: no requirements paragraph and no satellites list', () => {
     const { container } = show();
-    const hint = container.querySelector('.hint')!.textContent!;
-    expect(hint).toMatch(/maximum span of 2\.5 hours/);
-    expect(hint).toMatch(/peak of 40° or higher/);
-    expect(hint).toMatch(/full pass \(rise to set\)/);
+    expect(container.querySelector('.results-intro .hint:not(.small)')).toBeNull();
+    expect(container.querySelector('section.results > .hint:not(.small)')).toBeNull();
+    expect(container.textContent).not.toMatch(/Satellites considered|Clusters of at least|maximum span of/);
+    expect(container.querySelector('h2')!.textContent).toMatch(/^\d+ results?$/);
   });
 });
 

@@ -11,6 +11,8 @@ import type { SavedEvent } from '../saved/saved.ts';
 import { clearLegacyEvents, countLegacyEvents, loadEvents, saveEvents } from '../storage.ts';
 import { PlanForm } from './PlanForm.tsx';
 import { Results } from './Results.tsx';
+import { rankResults } from '../cluster/cluster.ts';
+import type { SortBy } from '../cluster/cluster.ts';
 import { SavedEvents } from './SavedEvents.tsx';
 import { SOURCES } from '../catalog/catalog.ts';
 import { browserTimeZone } from './PlanForm.tsx';
@@ -28,6 +30,7 @@ export function App() {
   const [load, setLoad] = useState<LoadResult | null>(null);
   const [search, setSearch] = useState<Search>({ state: 'idle' });
   const [events, setEvents] = useState<SavedEvent[]>(() => loadEvents());
+  const [sortBy, setSortBy] = useState<SortBy>('date'); // result order only: never changes what qualifies
   // Entries from the earlier fixed-window model: left untouched in storage; removed only if the user asks.
   const [legacyCount, setLegacyCount] = useState(() => countLegacyEvents());
   const [storageWarn, setStorageWarn] = useState(false);
@@ -110,9 +113,19 @@ export function App() {
     e.window.start === start && e.window.end === end &&
     e.location.latDeg === inputs.observer.latDeg && e.location.lonDeg === inputs.observer.lonDeg;
 
-  const save = (idx: number) => {
-    if (search.state !== 'done') return;
+  // The list the user sees: re-ordered from the full candidate set (never a re-search) BEFORE the display limit.
+  const displayed = useMemo(() => {
+    if (search.state !== 'done') return null;
     const { inputs, result } = search;
+    const effective: SortBy = inputs.criteria.minOpportunities <= 1 && sortBy === 'count' ? 'date' : sortBy;
+    const { windows, windowsTotal } = rankResults(result.assessments, result.availabilityIntervals, { ...inputs.criteria, sort: effective });
+    return { ...result, windows, windowsTotal };
+  }, [search, sortBy]);
+
+  const save = (idx: number) => {
+    if (search.state !== 'done' || !displayed) return;
+    const { inputs } = search;
+    const result = displayed;
     const w = result.windows[idx];
     if (!w) return;
     const snap = snapshotEvent(
@@ -168,7 +181,9 @@ export function App() {
             {search.state === 'done' && (
               <Results
                 inputs={search.inputs}
-                result={search.result}
+                result={displayed ?? search.result}
+                sortBy={search.inputs.criteria.minOpportunities <= 1 && sortBy === 'count' ? 'date' : sortBy}
+                onSortChange={setSortBy}
                 nowMs={search.nowMs}
                 statusProblem={load?.ok ? load.statusProblem : null}
                 isSaved={(s, e) => events.some((x) => sameEvent(x, s, e, search.inputs))}
