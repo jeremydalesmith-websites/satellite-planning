@@ -10,10 +10,18 @@ interface Props {
 }
 
 /**
- * Compact selection of the satellites that currently pass the operational-eligibility rule.
- * The selection itself is never edited by eligibility: a selected satellite that is not eligible
+ * Compact selection of the satellites heard in the status window. Each row shows the report tally, so the evidence is in
+ * front of the person; a satellite whose newest reports are corroborated misses carries a warning and is used only if
+ * its box is ticked. The selection itself is never edited by eligibility: a selected satellite that is not eligible
  * right now is only mentioned here, and is used again automatically if it becomes eligible.
  */
+function tally(s: SatelliteEligibility['status']): string {
+  const parts = [`${s.positives} heard`];
+  if (s.notHeard > 0) parts.push(`${s.notHeard} not heard`);
+  if (s.beaconOnly > 0) parts.push(`${s.beaconOnly} beacon only`);
+  return parts.join(' · ');
+}
+
 export function SatellitePicker({ eligibility, selected, onToggle }: Props) {
   if (!eligibility) {
     return (
@@ -46,15 +54,27 @@ export function SatellitePicker({ eligibility, selected, onToggle }: Props) {
                   {a && <span className="muted"> {compactBands(a)}</span>}
                   {a?.sunlightRequired && <span className="tag"> sunlit only</span>}
                   {a?.interruptible && <span className="tag"> {a.interruptibleBadge ?? 'interruptible'}</span>}
+                  <span className="muted small"> {tally(e.status)}</span>
+                  {e.status.warning && (
+                    <span className="tag warn-tag" title={e.status.explanation}>
+                      {' '}⚠ newest {e.status.newerNegatives} reports are misses
+                    </span>
+                  )}
                 </label>
               </li>
             );
           })}
         </ul>
       )}
+      {eligible.length > 0 && (
+        <p className="hint small">
+          Listed: FM repeaters heard in the last 72 hours, with their report counts. ⚠ means the newest reports, from two or more
+          stations, are misses, so it may be off; it is planned only if you tick it.
+        </p>
+      )}
       {heldBack.length > 0 && (
         <p className="hint small">
-          Still selected, but not eligible right now: {heldBack.map((e) => e.name).join(', ')}. They stay out of results until they have a qualifying report, then return automatically.
+          Still selected, but not eligible right now: {heldBack.map((e) => e.name).join(', ')}. They stay out of results until they have a “heard” report, then return automatically.
         </p>
       )}
     </fieldset>

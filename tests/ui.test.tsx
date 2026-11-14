@@ -412,3 +412,34 @@ describe('data URL resolution (base path)', () => {
     expect(dataUrl('data/elements.json', './', o, o + '/satellites/').href).toBe(o + '/satellites/data/elements.json');
   });
 });
+
+describe('satellite picker: report tally and the corroborated-misses warning', () => {
+  const sec = (hoursAgo: number) => Math.floor((NOW - hoursAgo * 3_600_000) / 1000);
+  const statusFile: StatusFile = {
+    schema: 1, source: { name: 't', url: 'u', license: 'x' }, downloadedAt: new Date(NOW).toISOString(),
+    satellites: {
+      'ISS_[FM]': { reports: [[sec(1), 'H', 0], [sec(2), 'H', 1]] },
+      'SO-50_[FM]': { reports: [[sec(1), 'N', 0], [sec(2), 'H', 1], [sec(3), 'H', 2]] }, // one newer miss: no warning
+      'AO-91_[FM]': { reports: [[sec(1), 'N', 0], [sec(2), 'N', 1], [sec(4), 'H', 2]] }, // corroborated newer misses: warning
+    },
+  };
+  const elig = evaluateEligibility(statusFile, NOW);
+  const row = (name: string) => screen.getByRole('checkbox', { name: new RegExp(`^${name}`) }) as HTMLInputElement;
+
+  it('every satellite heard in the window has a checkbox and shows its tally', () => {
+    render(<PlanForm busy={false} onSearch={() => {}} eligibility={elig} />);
+    expect(row('ISS').closest('label')!.textContent).toContain('2 heard');
+    expect(row('SO-50').closest('label')!.textContent).toContain('2 heard · 1 not heard');
+    expect(row('AO-91').closest('label')!.textContent).toContain('1 heard · 2 not heard');
+  });
+  it('only the corroborated case carries the warning; a first-time visitor finds it unticked, and ticking it is honoured', async () => {
+    const onSearch = vi.fn();
+    render(<PlanForm busy={false} onSearch={onSearch} eligibility={elig} />);
+    expect(row('AO-91').closest('label')!.textContent).toContain('⚠ newest 2 reports are misses');
+    expect(row('SO-50').closest('label')!.textContent).not.toContain('⚠');
+    expect([row('ISS').checked, row('SO-50').checked, row('AO-91').checked]).toEqual([true, true, false]);
+    await userEvent.click(row('AO-91'));
+    expect(row('AO-91').checked).toBe(true);
+    expect(loadPrefs().selectedIds).toEqual([25544, 27607, 43017]); // the explicit choice is stored exactly as made
+  });
+});

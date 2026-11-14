@@ -182,6 +182,7 @@ footer ul { padding-left: 20px; }
 .sat-picker .sat-list label { display: flex; flex-wrap: wrap; align-items: center; gap: .15rem .4rem; }
 .tag { font-size: .8em; border: 1px solid currentColor; border-radius: .6em; padding: 0 .4em; opacity: .8; }
 .badge.restrict { border: 1px solid currentColor; background: transparent; }
+.warn-tag { color: var(--warn); font-weight: 600; opacity: 1; }
 .pass dl.key { display: flex; flex-wrap: wrap; gap: .25rem 1.5rem; margin: .4rem 0; }
 .pass dl.key > div { display: flex; flex-direction: column; }
 .pass dl.key dt { font-size: .8em; opacity: .75; }

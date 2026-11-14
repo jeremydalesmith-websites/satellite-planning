@@ -50,10 +50,24 @@ describe('operating status policy', () => {
   it('one negative report is only unconfirmed, not "known unavailable"', () => {
     expect(classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'N', 0]]), NOW).state).toBe('unknown-stale');
   });
-  it('a newer negative after a positive is treated as conflicting (not counted)', () => {
+  it('one newer miss after a positive does not remove it: it still counts, the miss is stated, and there is no warning', () => {
     const s = classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'N', 0], [hoursAgo(4), 'H', 1]]), NOW);
-    expect(s.countsTowardMinimum).toBe(false);
-    expect(s.explanation).toMatch(/Mixed reports/);
+    expect(s.countsTowardMinimum).toBe(true);
+    expect(s.warning).toBe(false);
+    expect([s.newerNegatives, s.newerNegativeStations]).toEqual([1, 1]);
+    expect(s.explanation).toMatch(/newest report is a miss \(from 1 station\), too few to outweigh/);
+  });
+  it('corroborated newer misses (2+ reports from 2+ stations since the last "heard") keep it selectable WITH a warning', () => {
+    const s = classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'N', 0], [hoursAgo(2), 'T', 1], [hoursAgo(4), 'H', 2]]), NOW);
+    expect(s.countsTowardMinimum).toBe(true);
+    expect(s.warning).toBe(true);
+    expect(s.detail).toBe('mixed');
+    expect(s.explanation).toMatch(/^Warning: the 2 newest reports, from 2 stations, are misses/);
+  });
+  it('several newer misses from ONE station are not corroborated, and misses older than the last "heard" never warn', () => {
+    expect(classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'N', 0], [hoursAgo(2), 'N', 0], [hoursAgo(4), 'H', 1]]), NOW).warning).toBe(false);
+    const older = classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'H', 2], [hoursAgo(2), 'N', 0], [hoursAgo(3), 'N', 1]]), NOW);
+    expect([older.warning, older.newerNegatives, older.detail]).toEqual([false, 0, 'active']);
   });
   it('missing status data or a fetch error never counts', () => {
     expect(classifyStatus(so50, null, NOW).countsTowardMinimum).toBe(false);
@@ -188,9 +202,9 @@ describe('FM-mode matching: other modes and beacons can never establish FM avail
   });
 });
 
-describe('three kinds of "no" are distinct in label, detail and wording', () => {
+describe('labels, details and outcomes are distinct', () => {
   const notHeard = classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'N', 0]]), NOW);
-  const mixed = classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'N', 0], [hoursAgo(4), 'H', 1]]), NOW);
+  const mixed = classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'N', 0], [hoursAgo(2), 'N', 1], [hoursAgo(4), 'H', 2]]), NOW);
   const confirmed = classifyStatus(so50, file('SO-50_[FM]', [[hoursAgo(1), 'N', 0], [hoursAgo(2), 'N', 1]]), NOW);
   it('labels', () => {
     expect(notHeard.label).toBe('Not heard (unconfirmed)');
@@ -200,9 +214,10 @@ describe('three kinds of "no" are distinct in label, detail and wording', () => 
   });
   it('details and policy outcome', () => {
     expect([notHeard.detail, mixed.detail, confirmed.detail]).toEqual(['not-heard', 'mixed', 'confirmed-unavailable']);
-    expect([notHeard.state, mixed.state, confirmed.state]).toEqual(['unknown-stale', 'unknown-stale', 'known-unavailable']);
-    // None counts, and none is shown in results: all three are excluded from planning for lack of evidence.
-    expect([notHeard, mixed, confirmed].every((s) => !s.countsTowardMinimum)).toBe(true);
+    expect([notHeard.state, mixed.state, confirmed.state]).toEqual(['unknown-stale', 'recently-reported-active', 'known-unavailable']);
+    // Without any "heard" report nothing counts. With one, it counts, and corroborated newer misses add the warning.
+    expect([notHeard, mixed, confirmed].map((s) => s.countsTowardMinimum)).toEqual([false, true, false]);
+    expect([notHeard, mixed, confirmed].map((s) => s.warning)).toEqual([false, true, false]);
   });
   it('an activation-required repeater is labelled as needing a confirmed activation window, whatever the reports say', () => {
     const act = { amsatStatusKey: 'IO-86_[FM]', interruptible: false, activationRequired: true };

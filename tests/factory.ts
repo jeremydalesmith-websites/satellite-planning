@@ -20,7 +20,7 @@ export function status(state: StatusState, interruptible = false): OperationalSt
   return {
     state, label: STATUS_LABELS[state], explanation: 'test', interruptible, activationRequired: state === 'activation-required',
     detail: state === 'recently-reported-active' ? 'active' : state === 'known-unavailable' ? 'confirmed-unavailable' : state === 'activation-required' ? 'activation-unconfirmed' : 'no-recent-reports',
-    lastPositiveMs: null, lastNegativeMs: null, positives: 0, negatives: 0, notHeard: 0, beaconOnly: 0, windowHours: 72,
+    lastPositiveMs: null, lastNegativeMs: null, positives: 0, negatives: 0, notHeard: 0, beaconOnly: 0, newerNegatives: 0, newerNegativeStations: 0, warning: false, windowHours: 72,
     dataDownloadedAt: null, countsTowardMinimum: state === 'recently-reported-active',
   };
 }

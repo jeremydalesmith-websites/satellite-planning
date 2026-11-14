@@ -29,6 +29,7 @@ export function EventCard({ event: e, rank, tz, criteria, meta, saved, onSave }:
   };
   const ok = e.counted.length >= criteria.minOpportunities;
   const hasMore = e.alternatives.length + e.excluded.length > 0;
+  const flagged = [...new Set(e.counted.filter((p) => p.status.warning).map((p) => p.name))];
 
   return (
     <section className="card event" aria-labelledby={`ev-${rank}`}>
@@ -53,6 +54,7 @@ export function EventCard({ event: e, rank, tz, criteria, meta, saved, onSave }:
           </>
         )}
         {!ok && <span className="warn"> (below your minimum of {criteria.minOpportunities})</span>}
+        {flagged.length > 0 && <span className="warn"> ⚠ {flagged.join(', ')}: recent reports are misses, so it may be off</span>}
       </p>
 
       <Timeline window={e.window} tz={tz} items={e.counted.map((pass) => ({ pass, kind: 'counted' as const }))} />

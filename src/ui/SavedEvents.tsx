@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { ACTIVITIES } from '../catalog/catalog.ts';
 import type { LoadedData } from '../planner.ts';
 import { buildGoogleCalendarUrl } from '../export/googleCalendar.ts';
-import { InvalidCalendarDataError, lostEligibilityAlerts } from '../export/calendar.ts';
+import { InvalidCalendarDataError, lostEligibilityAlerts, recentMissAlerts } from '../export/calendar.ts';
 import { recheckSavedEvent } from '../saved/recheck.ts';
 import type { SavedEvent } from '../saved/saved.ts';
 import { PassCard } from './PassCard.tsx';
@@ -57,13 +57,15 @@ function SavedCard({ ev, data, nowMs, onDelete }: { ev: SavedEvent; data: Loaded
 
   /**
    * The "Add to Google Calendar" link, built from the event AS SAVED (the saved times and details, never recalculated ones). The only
-   * thing taken from the re-check is a current lost-eligibility warning, which goes first in the description. The link opens Google
+   * things taken from the re-check are current warnings (lost eligibility, or newest reports being misses), which go first in the description. The link opens Google
    * Calendar with the event filled in; the person saves it there. Nothing is sent from this page, and nothing is stored.
    */
   const calendar = useMemo(() => {
     try {
       // A past event gets no "re-check before the event" warning: the label "Past event" already says it.
-      const alerts = out.ok && !out.passed ? lostEligibilityAlerts(out.recheck.lostEligibility) : [];
+      const alerts = out.ok && !out.passed
+        ? [...lostEligibilityAlerts(out.recheck.lostEligibility), ...recentMissAlerts(out.recheck.evaluation.counted.filter((p) => p.status.warning).map((p) => p.name))]
+        : [];
       return { url: buildGoogleCalendarUrl({ ...ev, alerts }, nowMs) } as const;
     } catch (e) {
       return { error: `${e instanceof InvalidCalendarDataError ? e.message : 'The calendar link could not be created.'} Nothing can be added to a calendar for this event.` } as const;

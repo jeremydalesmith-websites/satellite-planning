@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { addDays, localDate } from '../availability/availability.ts';
 import { EVENT_DURATIONS_MIN, MAX_SEARCH_DAYS, DEFAULT_MIN_ELEVATION_DEG, DEFAULT_MIN_OPPORTUNITIES, DEFAULT_SEARCH_DAYS } from '../domain/policy.ts';
 import { loadPrefs, savePrefs } from '../storage.ts';
-import { DEFAULT_SELECTED_NORAD_IDS } from '../eligibility/eligibility.ts';
+import { defaultSelection } from '../eligibility/eligibility.ts';
 import type { SatelliteEligibility } from '../eligibility/eligibility.ts';
 import { AvailabilityGrid } from './AvailabilityGrid.tsx';
 import { SatellitePicker } from './SatellitePicker.tsx';
@@ -55,7 +55,7 @@ export function PlanForm({ busy, onSearch, eligibility = null }: Props) {
   const [f, setF] = useState<FormFields>(initialFields);
   // The user's explicit choice, stored as chosen. null = never chosen, so the defaults apply.
   const [chosen, setChosen] = useState<number[] | null>(() => loadPrefs().selectedIds ?? null);
-  const selected: readonly number[] = chosen ?? DEFAULT_SELECTED_NORAD_IDS;
+  const selected: readonly number[] = chosen ?? defaultSelection(eligibility);
   const toggle = (id: number) => setChosen(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
   const [submitted, setSubmitted] = useState(false);
   const singlePass = Number(f.minOpportunitiesText.trim()) === 1; // minimum passes = 1: single-pass mode

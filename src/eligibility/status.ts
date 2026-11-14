@@ -6,8 +6,11 @@
  * beacon being heard ("Telemetry Only") does NOT show its FM repeater works.
  *
  * States (what the user asked to distinguish):
- *   recently-reported-active  FM activity reported within the freshness window, with
- *                             no newer negative report. The only state that counts.
+ *   recently-reported-active  FM activity ("Heard") reported within the freshness window. The only state that
+ *                             counts. Newer negative reports do NOT remove it: they are shown in the tally, and
+ *                             when they are corroborated (several reports from several stations since the last
+ *                             "Heard") the status carries a WARNING that follows the satellite everywhere it is
+ *                             shown. The person decides, with the satellite's checkbox, whether to plan with it.
  *   known-unavailable         Repeated negative reports, no positive ones, in the window.
  *   activation-required       Catalog says the repeater operates only when separately activated
  *                             (scheduled, experimental or commanded). A recent report does not show
@@ -40,8 +43,8 @@ export type StatusState =
  * POLICY depends only on `state`; `detail` exists so the UI can say clearly which kind of
  * "no" this is.
  *
- *   active                 heard recently, nothing newer says otherwise      -> eligible
- *   mixed                  heard AND a newer negative report                 -> left out of planning
+ *   active                 heard recently; no corroborated newer misses      -> eligible
+ *   mixed                  heard, then corroborated newer misses             -> eligible WITH A WARNING (`warning`)
  *   not-heard              negative report(s) only, too few to conclude      -> left out
  *   confirmed-unavailable  repeated negatives from several operators         -> left out
  *   no-recent-reports      nothing in the freshness window                   -> left out
@@ -79,6 +82,15 @@ export interface OperationalStatus {
   beaconOnly: number;
   /** Kind of the NEWEST contrary report in the window (wording only; never changes eligibility). */
   newestNegative?: 'not-heard' | 'beacon-only' | null;
+  /** Negative reports NEWER than the newest "Heard" in the window, and how many distinct stations filed them. */
+  newerNegatives: number;
+  newerNegativeStations: number;
+  /**
+   * True when the newer negatives are corroborated (at least UNAVAILABLE_MIN_REPORTS reports from at least
+   * UNAVAILABLE_MIN_CALLSIGNS stations since the last "Heard"). The satellite stays selectable; the warning is shown
+   * in the picker, on its pass cards, on events that contain it and in the calendar entry.
+   */
+  warning: boolean;
   windowHours: number;
   /** When the status data was downloaded (ISO), or null if there is no status data. */
   dataDownloadedAt: string | null;
@@ -108,7 +120,7 @@ export const DETAIL_LABELS: Record<StatusDetail, string> = {
  * Deliberately worded as missing EVIDENCE, never as proof that the repeater is off.
  * Lowercase fragment with no trailing period, so callers can build "NAME: <reason>."
  */
-export function exclusionReason(s: Pick<OperationalStatus, 'state' | 'detail' | 'windowHours' | 'newestNegative'>): string | null {
+export function exclusionReason(s: Pick<OperationalStatus, 'state' | 'detail' | 'windowHours'>): string | null {
   if (s.state === 'recently-reported-active') return null;
   const base = `no qualifying FM report in the last ${s.windowHours} hours`;
   switch (s.detail) {
@@ -116,16 +128,6 @@ export function exclusionReason(s: Pick<OperationalStatus, 'state' | 'detail' | 
       return 'requires a confirmed activation window covering the pass, and none is available (a recent report alone does not qualify it)';
     case 'no-data':
       return 'status data unavailable, so eligibility cannot be established';
-    case 'mixed': {
-      // Mixed/contrary evidence: recent positive reports, then a newer contrary one. A "Not Heard" report says one
-      // listener did not hear the repeater; it is not proof of failure. Beacon/telemetry-only says the beacon was
-      // heard, which does not show the FM repeater works. Either way the older positives are not treated as current.
-      const newer =
-        s.newestNegative === 'not-heard' ? 'a newer “Not Heard” report'
-        : s.newestNegative === 'beacon-only' ? 'a newer beacon/telemetry-only report'
-        : 'a newer contrary report';
-      return `recent positive FM reports were followed by ${newer} (mixed evidence), so they are not treated as current evidence`;
-    }
     case 'not-heard':
     case 'confirmed-unavailable':
       return `${base} (only negative reports)`;
@@ -187,6 +189,9 @@ function classifyReports(
       negatives: 0,
       notHeard: 0,
       beaconOnly: 0,
+      newerNegatives: 0,
+      newerNegativeStations: 0,
+      warning: false,
       countsTowardMinimum: false,
       ...c,
     };
@@ -221,26 +226,38 @@ function classifyReports(
     // 'C' (ISS crew voice active) says nothing about the FM repeater and is ignored.
   }
   const negatives = notHeard + beaconOnly;
-  const counts = { lastPositiveMs: lastPos, lastNegativeMs: lastNeg, positives, negatives, notHeard, beaconOnly, newestNegative };
+  // Negatives filed AFTER the newest "Heard": the only ones that can speak against it being on now.
+  let newerNegatives = 0;
+  const newerStations = new Set<number>();
+  if (lastPos !== null) {
+    for (const [sec, code, caller] of entry.reports) {
+      const t = sec * 1000;
+      if (t < since || t > nowMs + 3_600_000 || t <= lastPos) continue;
+      if (code === 'N' || code === 'T') { newerNegatives++; newerStations.add(caller); }
+    }
+  }
+  const newerNegativeStations = newerStations.size;
+  const warning = newerNegatives >= UNAVAILABLE_MIN_REPORTS && newerNegativeStations >= UNAVAILABLE_MIN_CALLSIGNS;
+  const counts = { lastPositiveMs: lastPos, lastNegativeMs: lastNeg, positives, negatives, notHeard, beaconOnly, newestNegative, newerNegatives, newerNegativeStations };
   const negText = `${notHeard} "not heard"${beaconOnly ? ` and ${beaconOnly} "beacon only"` : ''}`;
 
-  if (positives > 0 && (lastNeg === null || (lastPos !== null && lastPos > lastNeg))) {
+  if (positives > 0) {
+    const heard = `${positives} "heard" report${positives === 1 ? '' : 's'} in the last ${windowHours} hours`;
+    const stations = `${newerNegativeStations} station${newerNegativeStations === 1 ? '' : 's'}`;
+    const explanation =
+      newerNegatives === 0 ? `${heard} and none newer saying otherwise.${schedNote}`
+      : warning ? `Warning: the ${newerNegatives} newest reports, from ${stations}, are misses (not heard or beacon only), after ${heard}. The repeater may be off. It is planned only because it is selected.${schedNote}`
+      : `${heard}. The newest ${newerNegatives === 1 ? 'report is a miss' : `${newerNegatives} reports are misses`} (from ${stations}), too few to outweigh them.${schedNote}`;
     return {
       ...base,
       ...counts,
+      warning,
       state: 'recently-reported-active',
-      detail: 'active',
-      label: DETAIL_LABELS.active,
-      explanation: `${positives} "heard" report${positives === 1 ? '' : 's'} in the last ${windowHours} hours and none newer saying otherwise.${schedNote}`,
+      detail: warning ? 'mixed' : 'active',
+      label: warning ? DETAIL_LABELS.mixed : DETAIL_LABELS.active,
+      explanation,
       countsTowardMinimum: true,
     };
-  }
-  if (positives > 0) {
-    return unconfirmed(
-      'mixed',
-      `Mixed reports in the last ${windowHours} hours: ${positives} heard and ${negText}, with a newer contrary report. That is mixed evidence, not proof the repeater is off, so the earlier reports are not treated as current.`,
-      counts,
-    );
   }
   if (negatives >= UNAVAILABLE_MIN_REPORTS && negCallers.size >= UNAVAILABLE_MIN_CALLSIGNS) {
     return {
@@ -250,6 +267,7 @@ function classifyReports(
       detail: 'confirmed-unavailable',
       label: DETAIL_LABELS['confirmed-unavailable'],
       explanation: `${negText} reports from ${negCallers.size} operators in the last ${windowHours} hours and none saying it worked. A heard beacon alone does not mean the repeater works.`,
+      warning: false,
       countsTowardMinimum: false,
     };
   }

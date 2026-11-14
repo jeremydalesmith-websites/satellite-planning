@@ -53,6 +53,9 @@ export function PassCard({ pass: p, role, tz, overlapNames, statusDownloadedAt }
               {act.interruptibleBadge ?? 'Subject to interruptions'}
             </span>
           )}
+          {st.warning && (
+            <span className="badge restrict warn-tag" title={st.explanation}>⚠ Recent reports are misses</span>
+          )}
           {role !== 'counted' && <span className={`role ${role}`}>{ROLE_LABEL[role]}</span>}
         </span>
       </header>

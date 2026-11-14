@@ -314,3 +314,8 @@ export function lostEligibilityAlerts(lost: ReadonlyArray<{ name: string; reason
   }
   return out;
 }
+
+/** Alert texts (one per satellite) for counted passes whose satellite carries the corroborated-misses warning at the latest re-check. */
+export function recentMissAlerts(names: readonly string[]): string[] {
+  return [...new Set(names)].map((n) => `${n}: the newest activity reports are misses, so it may be off. Re-check before the event.`);
+}

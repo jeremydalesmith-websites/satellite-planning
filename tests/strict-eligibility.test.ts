@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyAvailability } from '../src/availability/availability.ts';
 import type { StatusFile } from '../src/data/ingest.ts';
-import { DEFAULT_SELECTED_NORAD_IDS, consideredIds, evaluateEligibility } from '../src/eligibility/eligibility.ts';
+import { DEFAULT_SELECTED_NORAD_IDS, consideredIds, defaultSelection, evaluateEligibility } from '../src/eligibility/eligibility.ts';
 import { classifyStatus } from '../src/eligibility/status.ts';
 import { assessPass } from '../src/eligibility/assess.ts';
 import { ACTIVITIES, FM_REPEATERS, RESTRICTIONS, SATELLITES, SOURCES, joinActivities } from '../src/catalog/catalog.ts';
@@ -62,61 +62,63 @@ describe('beacon, telemetry and other-mode reports never qualify', () => {
   });
 });
 
-describe('newer negative and mixed reports are treated exactly as before', () => {
+describe('newer misses: a tally and, when corroborated, a warning; never a removal', () => {
   const so50 = { amsatStatusKey: 'SO-50_[FM]', interruptible: false, activationRequired: false };
-  it('a newer negative after a positive is "mixed" and not eligible', () => {
+  it('a single newer miss after a positive: still eligible, no warning', () => {
     const f = only('SO-50_[FM]', [[hAgo(1), 'N', 0], [hAgo(4), 'H', 1]]);
-    expect(classifyStatus(so50, f, NOW).detail).toBe('mixed');
+    expect(classifyStatus(so50, f, NOW).detail).toBe('active');
     const e = byName(f)['SO-50']!;
-    expect(e.eligible).toBe(false);
-    expect(e.reason).toContain('followed by a newer “Not Heard” report (mixed evidence)');
+    expect([e.eligible, e.reason, e.status.warning]).toEqual([true, null, false]);
   });
-  it('a positive newer than the last negative still qualifies', () => {
-    expect(byName(only('SO-50_[FM]', [[hAgo(4), 'N', 0], [hAgo(1), 'H', 1]]))['SO-50']!.eligible).toBe(true);
+  it('the real case that prompted the change: 47 heard, then one "Not Heard" from one station, stays in without a warning', () => {
+    const heard = Array.from({ length: 47 }, (_, i): [number, 'H', number] => [hAgo(7 + i), 'H', i + 1]);
+    const e = byName(only('SO-50_[FM]', [[hAgo(5.5), 'N', 0], ...heard]))['SO-50']!;
+    expect([e.eligible, e.status.warning, e.status.positives, e.status.notHeard]).toEqual([true, false, 47, 1]);
   });
-  it('repeated negatives are not eligible', () => {
-    expect(byName(only('SO-50_[FM]', [[hAgo(1), 'N', 0], [hAgo(2), 'T', 1]]))['SO-50']!.eligible).toBe(false);
+  it('an AO-91-like history (misses from two stations since the only "heard") is selectable but warned', () => {
+    const e = byName(only('AO-91_[FM]', [[hAgo(0.8), 'N', 0], [hAgo(6.8), 'N', 1], [hAgo(24.6), 'N', 0], [hAgo(38.7), 'H', 2], [hAgo(48.4), 'N', 0]]))['AO-91']!;
+    expect([e.eligible, e.status.warning, e.status.newerNegatives, e.status.newerNegativeStations]).toEqual([true, true, 3, 2]);
+    expect(e.status.label).toBe('Mixed reports');
   });
-});
-
-describe('diagnostic wording distinguishes three kinds of "no" (wording only: eligibility is unchanged)', () => {
-  const reason = (reports: StatusFile['satellites'][string]['reports']) => byName(only('AO-123_[FM]', reports))['AO-123']!;
-  const noPositive = reason([]);
-  const afterNotHeard = reason([[hAgo(30), 'H', 0], [hAgo(20), 'H', 1], [hAgo(2), 'N', 2]]);
-  const afterBeacon = reason([[hAgo(30), 'H', 0], [hAgo(20), 'H', 1], [hAgo(2), 'T', 2]]);
-
-  it('1. no recent positive FM report', () => {
-    expect(noPositive.reason).toBe('no qualifying FM report in the last 72 hours');
-  });
-  it('2. recent positive reports superseded by a newer "Not Heard" report: mixed evidence, naming Not Heard', () => {
-    expect(afterNotHeard.reason).toBe('recent positive FM reports were followed by a newer “Not Heard” report (mixed evidence), so they are not treated as current evidence');
-  });
-  it('3. recent positive reports superseded by a newer beacon/telemetry-only report: mixed evidence, naming the beacon', () => {
-    expect(afterBeacon.reason).toBe('recent positive FM reports were followed by a newer beacon/telemetry-only report (mixed evidence), so they are not treated as current evidence');
-  });
-  it('the three are distinct, and none of them is eligible (the policy is unchanged)', () => {
-    expect(new Set([noPositive.reason, afterNotHeard.reason, afterBeacon.reason]).size).toBe(3);
-    expect([noPositive, afterNotHeard, afterBeacon].map((e) => e.eligible)).toEqual([false, false, false]);
-  });
-  it('names the NEWEST contrary report: Not Heard then a later beacon-only report is described as beacon-only, and the reverse as Not Heard', () => {
-    expect(reason([[hAgo(30), 'H', 0], [hAgo(5), 'N', 1], [hAgo(2), 'T', 2]]).reason).toContain('beacon/telemetry-only');
-    expect(reason([[hAgo(30), 'H', 0], [hAgo(5), 'T', 1], [hAgo(2), 'N', 2]]).reason).toMatch(/“Not Heard”/);
-  });
-  it('matches an AO-123-like history (many Heard, then several beacon-only and one Not Heard, newest beacon-only)', () => {
+  it('an AO-123-like history (many heard, then a miss and three beacon-only reports from four stations) is warned too', () => {
     const history: StatusFile['satellites'][string]['reports'] = [
       ...Array.from({ length: 10 }, (_, i): [number, 'H', number] => [hAgo(20 + i), 'H', i]),
       [hAgo(11.5), 'N', 20], [hAgo(11), 'T', 21], [hAgo(9), 'T', 22], [hAgo(4.5), 'T', 23],
     ];
-    const e = reason(history);
-    expect(e.eligible).toBe(false);
-    expect(e.reason).toContain('newer beacon/telemetry-only report (mixed evidence)');
+    const e = byName(only('AO-123_[FM]', history))['AO-123']!;
+    expect([e.eligible, e.status.warning, e.status.beaconOnly]).toEqual([true, true, 3]);
   });
-  it('never describes reports as outvoted or implies that a "Not Heard" report proves a failure', () => {
-    const bad = /outvot|fail|dead|broken|offline|inactive|not working|is off|unavailable/i;
-    for (const e of [noPositive, afterNotHeard, afterBeacon]) expect(e.reason).not.toMatch(bad);
-    // the longer explanation (shown in details) says the same thing
-    expect(afterNotHeard.status.explanation).toMatch(/mixed evidence, not proof the repeater is off/);
-    expect(afterNotHeard.status.explanation).not.toMatch(/not working/);
+  it('a positive newer than the last negative qualifies with no warning', () => {
+    const e = byName(only('SO-50_[FM]', [[hAgo(4), 'N', 0], [hAgo(3), 'N', 1], [hAgo(1), 'H', 2]]))['SO-50']!;
+    expect([e.eligible, e.status.warning]).toEqual([true, false]);
+  });
+  it('negatives alone are never eligible, however many: a "heard" report is still required', () => {
+    expect(byName(only('SO-50_[FM]', [[hAgo(1), 'N', 0], [hAgo(2), 'T', 1]]))['SO-50']!.eligible).toBe(false);
+    expect(byName(only('SO-50_[FM]', [[hAgo(1), 'T', 0]]))['SO-50']!.eligible).toBe(false); // a heard beacon is not a heard repeater
+  });
+  it('the warning wording says "may be off", never that the repeater is dead or broken', () => {
+    const e = byName(only('SO-50_[FM]', [[hAgo(1), 'N', 0], [hAgo(2), 'N', 1], [hAgo(4), 'H', 2]]))['SO-50']!;
+    expect(e.status.explanation).toMatch(/may be off/);
+    expect(e.status.explanation).not.toMatch(/dead|broken|failed|inactive|not working/i);
+  });
+});
+
+describe('a warned satellite is used only by deliberate choice', () => {
+  const warned: StatusFile['satellites'][string]['reports'] = [[hAgo(1), 'N', 0], [hAgo(2), 'N', 1], [hAgo(4), 'H', 2]];
+  const clean: StatusFile['satellites'][string]['reports'] = [[hAgo(1), 'H', 0]];
+  const f = mkFile({ 'ISS_[FM]': { reports: clean }, 'SO-50_[FM]': { reports: clean }, 'AO-91_[FM]': { reports: warned } });
+  const elig = evaluateEligibility(f, NOW);
+  it('it is left out of the default selection (someone who has never chosen), while the other defaults stay', () => {
+    expect(defaultSelection(elig)).toEqual([25544, 27607]);
+    expect([...consideredIds(elig)].sort()).toEqual([25544, 27607]);
+  });
+  it('an explicit choice is honoured exactly as made: ticking it plans with it', () => {
+    expect([...consideredIds(elig, [43017])]).toEqual([43017]);
+    expect([...consideredIds(elig, DEFAULT_SELECTED_NORAD_IDS)].sort()).toEqual([25544, 27607, 43017]);
+  });
+  it('with no warning anywhere the defaults are the usual three', () => {
+    expect(defaultSelection(evaluateEligibility(mkFile({}), NOW))).toEqual([...DEFAULT_SELECTED_NORAD_IDS]);
+    expect(defaultSelection(null)).toEqual([...DEFAULT_SELECTED_NORAD_IDS]);
   });
 });
 
@@ -156,9 +158,9 @@ describe('operating-pattern classification: interruptible vs activation-required
     expect(plan.windows).toHaveLength(1);
     expect(plan.windows[0]!.counted[0]!.name).toBe('ISS');
   });
-  it('ISS still needs recent positive evidence: no recent report, or a newer negative, excludes it', () => {
+  it('ISS still needs recent positive evidence: with no recent report it is excluded; one newer miss does not remove it', () => {
     expect(byName(only('ISS_[FM]', []))['ISS']!.eligible).toBe(false);
-    expect(byName(only('ISS_[FM]', [[hAgo(1), 'N', 0], [hAgo(4), 'H', 1]]))['ISS']!.reason).toMatch(/followed by a newer “Not Heard” report/);
+    expect(byName(only('ISS_[FM]', [[hAgo(1), 'N', 0], [hAgo(4), 'H', 1]]))['ISS']!.eligible).toBe(true);
     expect(planWith(only('ISS_[FM]', []), 25544).windows).toEqual([]);
   });
 

@@ -94,13 +94,20 @@ and synthetic geometry in `tests/factory.ts`.
   5 minutes after the last, a compact description, no location. It is a static copy and says so.
 * **No results?** The page explains why and suggests what could be relaxed. Nothing is ever relaxed automatically.
 
-### Strict eligibility (deliberate; do not loosen)
+### Eligibility (deliberate; do not loosen further without the owner's say-so)
 
-A satellite is considered **only** if its exact FM repeater entry has a "Heard" report in the rolling last 72 hours,
-measured back from the moment of the search or re-check, with no newer negative report. Anything else is left out of
-planning entirely (never in timelines, pass cards, counts or ranking) and is listed, with the reason, in a collapsed
-"Satellites not considered" area. Being left out means *this planner lacks the evidence*, not that the satellite is
-inactive. There is no "unconfirmed" tier and no option to show such passes.
+A satellite is considered **only** if its exact FM repeater entry has at least one "Heard" report in the rolling last 72
+hours, measured back from the moment of the search or re-check. A satellite without one is left out of planning entirely
+(never in timelines, pass cards, counts or ranking) and is listed, with the reason, in a collapsed "Satellites not
+considered" area. Being left out means *this planner lacks the evidence*, not that the satellite is inactive.
+
+**Newer misses do not remove a satellite; the operator decides.** Every satellite heard in the window gets a checkbox
+under "Satellites to consider", with its report tally beside it ("47 heard · 1 not heard"). When the misses are
+corroborated (at least 2 negative reports from at least 2 different stations since the last "Heard") the row carries a
+⚠ warning. A warned satellite is planned only if its box is ticked, it starts unticked for someone who has never chosen,
+and the warning follows it onto its pass cards, any event that contains it, and the calendar entry. One station's miss
+never raises the warning. (Until November 2026 any newer negative removed the satellite outright; one "Not Heard" from
+one station was then hiding SO-50 despite 47 "Heard" reports.)
 
 A recent report is necessary, not sufficient. The catalog classifies each repeater from its own cited source:
 
@@ -114,16 +121,17 @@ FM key, ingestion rejects any row with a different name, and the classifier read
 
 | AMSAT value | Meaning here | Can make the repeater count? |
 |---|---|---|
-| Heard | Someone worked or heard the FM repeater | Yes, if recent and not followed by a negative |
-| Telemetry Only | Only the beacon was heard | No (a negative) |
-| Not Heard | Nothing received | No (a negative) |
+| Heard | Someone worked or heard the FM repeater | Yes, if within 72 hours |
+| Telemetry Only | Only the beacon was heard | No (a miss; counts toward the warning) |
+| Not Heard | Nothing received | No (a miss; counts toward the warning) |
 | Crew Active | ISS crew voice | No (ignored) |
 
-Resulting labels: **Recently reported active** (eligible); **Mixed reports**, **Not heard (unconfirmed)**, **Confirmed
-unavailable** (2+ negatives from 2+ operators), **No recent reports**, **Activation window required**, **Status data
-unavailable** (all left out). These are volunteer reports; "confirmed" means repeatedly reported, not verified by AMSAT.
+Resulting labels: **Recently reported active** (eligible); **Mixed reports** (eligible, with the ⚠ warning); **Not heard
+(unconfirmed)**, **Confirmed unavailable** (2+ negatives from 2+ operators and no "Heard"), **No recent reports**,
+**Activation window required**, **Status data unavailable** (all left out). These are volunteer reports; "confirmed"
+means repeatedly reported, not verified by AMSAT.
 
-Selection: ISS, SO-50 and AO-91 start selected when eligible. The choice is stored exactly as made: a temporarily
+Selection: ISS, SO-50 and AO-91 start selected when eligible and not carrying the warning. The choice is stored exactly as made: a temporarily
 ineligible satellite stays selected, and an unchecked one is never re-selected.
 
 Freshness line: "Keplers updated ... · Activity reports updated ..." is when each file was last successfully
@@ -135,14 +143,14 @@ after 72 hours no satellite can qualify.
 | Policy | Value |
 |---|---|
 | Status freshness window | 72 h back from the search |
-| "Confirmed unavailable" | at least 2 negative reports from at least 2 operators, no positive |
+| "Confirmed unavailable", and the ⚠ warning | at least 2 negative reports from at least 2 stations (with no "Heard" at all; or since the last "Heard") |
 | Orbital-elements age limit | 30 days (older sets are skipped and named in the results) |
 | Shadow rule | shadow fraction ≥ 0.01 = not sunlit |
 | Elevation input | 5° to 85° (default 40°) |
 | Search span | default 28 days, at most 42 |
 | Calendar entry buffers | 10 min before, 5 min after, 15 min minimum |
 
-These are this app's choices, not guarantees from AMSAT or satellite owners. The status rule is strict on purpose, so
+These are this app's choices, not guarantees from AMSAT or satellite owners. A "Heard" report in the last 72 hours is always required, so
 with three passes required you may see empty results.
 
 ## Catalog maintenance
